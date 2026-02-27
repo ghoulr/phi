@@ -14,13 +14,14 @@
     "typescript": "^5"
   },
   "scripts": {
-    "dev": "bun index.ts",
+    "tui": "bun index.ts tui",
     "prepare": "husky",
     "lint-staged": "lint-staged",
     "check": "biome format --write . && biome lint . && tsgo --noEmit",
     "test:agent": "AGENT=1 bun test --bail"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.55.1"
+    "@mariozechner/pi-coding-agent": "^0.55.1",
+    "cac": "^6.7.14"
   }
 }
