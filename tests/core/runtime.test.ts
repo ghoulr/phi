@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import { ConversationRuntime, type DisposableSession } from "@phi/core/runtime";
+import {
+	ConversationRuntime,
+	type DisposableSession,
+	PhiRuntime,
+} from "@phi/core/runtime";
 
 type FakeSession = DisposableSession & {
 	id: string;
@@ -70,5 +74,34 @@ describe("ConversationRuntime", () => {
 			createFakeSession("unused")
 		);
 		expect(runtime.disposeSession("missing")).toBe(false);
+	});
+});
+
+describe("PhiRuntime", () => {
+	it("isolates session creation by agent id", async () => {
+		const createCalls: string[] = [];
+		const runtime = new PhiRuntime<FakeSession>(async (agentId: string) => {
+			createCalls.push(agentId);
+			return createFakeSession(`${agentId}-${createCalls.length}`);
+		});
+
+		const mainSession = await runtime.getOrCreateSession(
+			"main",
+			"tui:default"
+		);
+		const supportSession = await runtime.getOrCreateSession(
+			"support",
+			"tui:default"
+		);
+
+		expect(mainSession.id).toBe("main-1");
+		expect(supportSession.id).toBe("support-2");
+	});
+
+	it("returns false when disposing unknown agent runtime", () => {
+		const runtime = new PhiRuntime<FakeSession>(async () =>
+			createFakeSession("unused")
+		);
+		expect(runtime.disposeSession("unknown", "tui:default")).toBe(false);
 	});
 });

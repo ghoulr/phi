@@ -21,7 +21,7 @@
     "test:agent": "AGENT=1 bun test --bail"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.55.1",
+    "@mariozechner/pi-coding-agent": "0.55.3",
     "cac": "^6.7.14"
   }
 }

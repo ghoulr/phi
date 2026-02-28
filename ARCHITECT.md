@@ -19,7 +19,7 @@ We keep design small (KISS), fail fast, and treat hot-reload as a first-class ru
 
 - KISS first: smallest viable architecture, no over-design.
 - Fast fail: propagate errors directly, no silent recovery.
-- **Hot-reload first**: rely on `pi` reload capability so `phi` configuration/prompt/context changes can take effect without service restart.
+- **Hot-reload first**: rely on `pi` reload capability so `phi` resource/config changes can take effect without service restart.
 
 ## Abstracted Data Layout
 
@@ -44,7 +44,7 @@ All agent resources must be accessed through provider adapters.
 
 Core abstractions:
 
-- `AgentResourceProvider`: read/write agent resources (`phi.yaml`, per-agent config, context, prompts, session metadata)
+- `AgentResourceProvider`: read/write agent resources (`phi.yaml`, per-agent config, prompts, session metadata)
 - `AuthProvider`: shared auth boundary (`auth/auth.json`)
 - `WorkspaceProvider`: resolve/provision per-agent workspace (`agents/<agentId>/pi`)
 
@@ -110,7 +110,6 @@ Recommended shape:
   - create `pi` session for one specific agent
   - set `agentDir` to `~/.phi/agents/<agentId>/pi`
   - bind shared auth from `~/.phi/auth/auth.json`
-  - keep context loading rules consistent and explicit
 
 No custom engine logic; `pi` still runs the loop.
 

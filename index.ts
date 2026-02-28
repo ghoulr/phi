@@ -5,8 +5,8 @@ import { tui } from "@phi/tui";
 const runtime = createPhiRuntime();
 
 const app = tui({
-	runTui: async () => {
-		await runTuiCommand(runtime);
+	runTui: async (agentId: string) => {
+		await runTuiCommand(runtime, agentId);
 	},
 });
 

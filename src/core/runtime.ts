@@ -1,12 +1,18 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 import {
+	AuthStorage,
 	createAgentSession,
 	DefaultResourceLoader,
 	type AgentSession,
+	SessionManager,
 } from "@mariozechner/pi-coding-agent";
+
+export const DEFAULT_AGENT_ID = "main";
+
+const AGENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
 export interface DisposableSession {
 	dispose(): void;
@@ -14,6 +20,34 @@ export interface DisposableSession {
 
 export type SessionFactory<TSession extends DisposableSession> =
 	() => Promise<TSession>;
+
+export type AgentSessionFactory<TSession extends DisposableSession> = (
+	agentId: string
+) => Promise<TSession>;
+
+export interface AgentConversationRuntime<TSession extends DisposableSession> {
+	getOrCreateSession(agentId: string, key: string): Promise<TSession>;
+	disposeSession(agentId: string, key: string): boolean;
+	disposeAllSessions(agentId?: string): void;
+}
+
+export interface AgentWorkspace {
+	agentId: string;
+	phiDir: string;
+	phiConfigFilePath: string;
+	agentRootDir: string;
+	piAgentDir: string;
+	sessionsDir: string;
+	sharedAuthFilePath: string;
+}
+
+export interface AgentResourceProvider {
+	resolveAgentWorkspace(
+		agentId: string,
+		cwd?: string,
+		userHomeDir?: string
+	): AgentWorkspace;
+}
 
 export class ConversationRuntime<TSession extends DisposableSession> {
 	private readonly sessions = new Map<string, TSession>();
@@ -68,26 +102,76 @@ export class ConversationRuntime<TSession extends DisposableSession> {
 	}
 }
 
+export class PhiRuntime<TSession extends DisposableSession>
+	implements AgentConversationRuntime<TSession>
+{
+	private readonly agentRuntimes = new Map<
+		string,
+		ConversationRuntime<TSession>
+	>();
+
+	public constructor(
+		private readonly agentSessionFactory: AgentSessionFactory<TSession>
+	) {}
+
+	public async getOrCreateSession(
+		agentId: string,
+		key: string
+	): Promise<TSession> {
+		const runtime = this.getOrCreateAgentRuntime(agentId);
+		return runtime.getOrCreateSession(key);
+	}
+
+	public disposeSession(agentId: string, key: string): boolean {
+		const runtime = this.agentRuntimes.get(agentId);
+		if (!runtime) {
+			return false;
+		}
+		return runtime.disposeSession(key);
+	}
+
+	public disposeAllSessions(agentId?: string): void {
+		if (agentId) {
+			const runtime = this.agentRuntimes.get(agentId);
+			if (!runtime) {
+				return;
+			}
+			runtime.disposeAllSessions();
+			return;
+		}
+
+		for (const runtime of this.agentRuntimes.values()) {
+			runtime.disposeAllSessions();
+		}
+	}
+
+	private getOrCreateAgentRuntime(
+		agentId: string
+	): ConversationRuntime<TSession> {
+		const existingRuntime = this.agentRuntimes.get(agentId);
+		if (existingRuntime) {
+			return existingRuntime;
+		}
+		const runtime = new ConversationRuntime<TSession>(() =>
+			this.agentSessionFactory(agentId)
+		);
+		this.agentRuntimes.set(agentId, runtime);
+		return runtime;
+	}
+}
+
+function assertValidAgentId(agentId: string): void {
+	if (!AGENT_ID_PATTERN.test(agentId)) {
+		throw new Error(`Invalid agent id: ${agentId}`);
+	}
+}
+
 function getPhiHomeDir(userHomeDir: string = homedir()): string {
 	return join(userHomeDir, ".phi");
 }
 
-function getPhiPiAgentDir(userHomeDir: string = homedir()): string {
-	return join(getPhiHomeDir(userHomeDir), "pi");
-}
-
 function getLegacyAgentsSkillsDir(userHomeDir: string = homedir()): string {
 	return join(userHomeDir, ".agents", "skills");
-}
-
-function getPhiContextDirs(
-	cwd: string = process.cwd(),
-	userHomeDir: string = homedir()
-): string[] {
-	return [
-		join(getPhiHomeDir(userHomeDir), "context"),
-		join(cwd, ".phi", "context"),
-	];
 }
 
 function isPathInsideDirectory(path: string, directory: string): boolean {
@@ -108,48 +192,56 @@ function isSkillFromLegacyAgentsDir(
 	);
 }
 
-function listMarkdownFilesRecursively(directory: string): string[] {
-	if (!existsSync(directory)) {
-		return [];
-	}
+export class FileSystemResourceProvider implements AgentResourceProvider {
+	public resolveAgentWorkspace(
+		agentId: string,
+		_cwd: string = process.cwd(),
+		userHomeDir: string = homedir()
+	): AgentWorkspace {
+		assertValidAgentId(agentId);
 
-	const entries = readdirSync(directory, { withFileTypes: true }).sort(
-		(a, b) => a.name.localeCompare(b.name)
-	);
-	const files: string[] = [];
-	for (const entry of entries) {
-		const fullPath = join(directory, entry.name);
-		if (entry.isDirectory()) {
-			files.push(...listMarkdownFilesRecursively(fullPath));
-			continue;
+		const phiDir = getPhiHomeDir(userHomeDir);
+		const phiConfigFilePath = join(phiDir, "phi.yaml");
+		if (!existsSync(phiConfigFilePath)) {
+			throw new Error(`Missing phi config file: ${phiConfigFilePath}`);
 		}
-		if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-			files.push(fullPath);
-		}
-	}
-	return files;
-}
 
-function loadPhiContextFiles(
-	cwd: string = process.cwd(),
-	userHomeDir: string = homedir()
-): Array<{ path: string; content: string }> {
-	return getPhiContextDirs(cwd, userHomeDir).flatMap((directory) =>
-		listMarkdownFilesRecursively(directory).map((filePath) => ({
-			path: filePath,
-			content: readFileSync(filePath, "utf-8"),
-		}))
-	);
+		const agentRootDir = join(phiDir, "agents", agentId);
+		if (!existsSync(agentRootDir)) {
+			throw new Error(`Unknown agent workspace: ${agentRootDir}`);
+		}
+
+		const piAgentDir = join(agentRootDir, "pi");
+		if (!existsSync(piAgentDir)) {
+			throw new Error(`Missing pi workspace directory: ${piAgentDir}`);
+		}
+
+		return {
+			agentId,
+			phiDir,
+			phiConfigFilePath,
+			agentRootDir,
+			piAgentDir,
+			sessionsDir: join(agentRootDir, "sessions"),
+			sharedAuthFilePath: join(phiDir, "auth", "auth.json"),
+		};
+	}
 }
 
 async function createPhiResourceLoader(
+	agentId: string,
+	resourceProvider: AgentResourceProvider,
 	cwd: string = process.cwd(),
 	userHomeDir: string = homedir()
 ): Promise<DefaultResourceLoader> {
-	const agentDir = getPhiPiAgentDir(userHomeDir);
+	const workspace = resourceProvider.resolveAgentWorkspace(
+		agentId,
+		cwd,
+		userHomeDir
+	);
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
-		agentDir,
+		agentDir: workspace.piAgentDir,
 		skillsOverride: (base) => ({
 			skills: base.skills.filter(
 				(skill) =>
@@ -157,27 +249,41 @@ async function createPhiResourceLoader(
 			),
 			diagnostics: base.diagnostics,
 		}),
-		agentsFilesOverride: () => ({
-			agentsFiles: loadPhiContextFiles(cwd, userHomeDir),
-		}),
+		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();
 	return resourceLoader;
 }
 
-async function createDefaultAgentSession(): Promise<AgentSession> {
+async function createDefaultAgentSession(
+	agentId: string
+): Promise<AgentSession> {
 	const cwd = process.cwd();
 	const userHomeDir = homedir();
+	const resourceProvider = new FileSystemResourceProvider();
+	const workspace = resourceProvider.resolveAgentWorkspace(
+		agentId,
+		cwd,
+		userHomeDir
+	);
+
 	const { session } = await createAgentSession({
 		cwd,
-		agentDir: getPhiPiAgentDir(userHomeDir),
-		resourceLoader: await createPhiResourceLoader(cwd, userHomeDir),
+		agentDir: workspace.piAgentDir,
+		authStorage: AuthStorage.create(workspace.sharedAuthFilePath),
+		sessionManager: SessionManager.create(cwd, workspace.sessionsDir),
+		resourceLoader: await createPhiResourceLoader(
+			agentId,
+			resourceProvider,
+			cwd,
+			userHomeDir
+		),
 	});
 	return session;
 }
 
 export function createPhiRuntime(
-	sessionFactory: SessionFactory<AgentSession> = createDefaultAgentSession
-): ConversationRuntime<AgentSession> {
-	return new ConversationRuntime<AgentSession>(sessionFactory);
+	sessionFactory: AgentSessionFactory<AgentSession> = createDefaultAgentSession
+): PhiRuntime<AgentSession> {
+	return new PhiRuntime<AgentSession>(sessionFactory);
 }
