@@ -4,6 +4,7 @@ import { DEFAULT_AGENT_ID } from "@phi/core/runtime";
 
 export interface TuiDependencies {
 	runTui(agentId: string): Promise<void>;
+	runService(): Promise<void>;
 }
 
 interface TuiCommandOptions {
@@ -24,6 +25,13 @@ export function tui(dependencies: TuiDependencies): CAC {
 		.action(async (options: TuiCommandOptions) => {
 			await dependencies.runTui(getAgentId(options));
 		});
+
+	app.command(
+		"service",
+		"Start channel service (currently Telegram polling)"
+	).action(async () => {
+		await dependencies.runService();
+	});
 
 	app.command("[...args]", "Run default command").action(
 		async (args: string[]) => {

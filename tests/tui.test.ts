@@ -11,6 +11,11 @@ describe("tui", () => {
 			runTui: async (agentId: string) => {
 				runAgents.push(agentId);
 			},
+			runService: async () => {
+				throw new Error(
+					"Service should not run in default command test."
+				);
+			},
 		});
 
 		app.parse(["bun", "phi"], { run: false });
@@ -25,6 +30,9 @@ describe("tui", () => {
 			runTui: async (agentId: string) => {
 				runAgents.push(agentId);
 			},
+			runService: async () => {
+				throw new Error("Service should not run in tui command test.");
+			},
 		});
 
 		app.parse(["bun", "phi", "tui", "--agent", "support"], {
@@ -35,17 +43,39 @@ describe("tui", () => {
 		expect(runAgents).toEqual(["support"]);
 	});
 
+	it("runs service command", async () => {
+		let runServiceCalls = 0;
+		const app = tui({
+			runTui: async () => {
+				throw new Error("Tui should not run in service command test.");
+			},
+			runService: async () => {
+				runServiceCalls += 1;
+			},
+		});
+
+		app.parse(["bun", "phi", "service"], {
+			run: false,
+		});
+		await app.runMatchedCommand();
+
+		expect(runServiceCalls).toBe(1);
+	});
+
 	it("fails fast on unknown command", async () => {
 		const app = tui({
 			runTui: async () => {
 				throw new Error("Tui should not run for unknown command.");
 			},
+			runService: async () => {
+				throw new Error("Service should not run for unknown command.");
+			},
 		});
 
-		app.parse(["bun", "phi", "telegram"], { run: false });
+		app.parse(["bun", "phi", "unknown"], { run: false });
 
 		await expect(app.runMatchedCommand()).rejects.toThrow(
-			"Unknown command: telegram"
+			"Unknown command: unknown"
 		);
 	});
 });

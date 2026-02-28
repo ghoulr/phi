@@ -76,9 +76,10 @@ Extensions should support **hot reload** too.
 
 - **File**: `index.ts`
 - Responsibility:
+  - load shared `phi.yaml` once
   - build `PhiRuntime`
   - build CLI app
-  - route commands to adapters
+  - route commands to adapters with loaded config
 
 Composition only, no business logic.
 
@@ -93,6 +94,7 @@ Composition only, no business logic.
 ### 3) Agent Runtime Orchestration Layer
 
 - **Core abstraction**: `PhiRuntime`
+- **Dedicated module**: `src/core/agent-pool.ts`
 - Responsibility:
   - manage per-agent runtime instance
   - provide keyed conversation/session lifecycle per agent
@@ -102,7 +104,7 @@ Recommended shape:
 
 - `AgentRegistry` (read from `phi.yaml`)
 - `AgentWorkspaceResolver` (resolve paths under `~/.phi/agents/<agentId>`)
-- `AgentRuntimePool` (`Map<agentId, ConversationRuntime>`)
+- `AgentPool` (multi-agent session/runtime pool)
 
 ### 4) Pi Session Factory Layer
 
@@ -128,25 +130,39 @@ Examples:
 - `phi tui` → starts TUI with `main`
 - `phi tui --agent support` → starts TUI with `support`
 
-### 2) Channels (Telegram/IM/HTTP webhook)
+### 2) Service Command
+
+- Command: `phi service`
+- Responsibility: start configured channel adapters
+- Input style: no channel-specific CLI parameters; channel settings are loaded from `phi.yaml`
+
+### 3) Channels (Telegram/IM/HTTP webhook)
 
 Channels are also adapters. They map inbound user messages to the right `agentId` and conversation key.
 
 Mapping is configured in `phi.yaml`, for example:
 
 ```yaml
+agents:
+  main:
+    model: big-pickle
+    provider: opencode
+    thinkingLevel: medium
+
 channels:
   telegram:
-    bots:
-      "123456789":
-        agentId: main
+    chats:
+      "-1001234567890":
+        enabled: true
+        agent: main
+        token: <telegram-bot-token>
 ```
 
 Runtime routing flow:
 
-1. receive inbound event (`provider`, `botId`, `chatId`, `userId`, message)
-2. resolve `agentId` from channel mapping in `phi.yaml`
-3. build deterministic conversation key (e.g. `telegram:123456789:chat:<chatId>:user:<userId>`)
+1. receive inbound event (`provider`, `chatId`, `userId`, message)
+2. resolve `agentId` by `chatId` mapping in `phi.yaml`
+3. build deterministic conversation key (e.g. `telegram:chat:<chatId>`)
 4. get/create session from `PhiRuntime(agentId, conversationKey)`
 5. forward message to `pi` session
 
@@ -183,7 +199,7 @@ Both call the same `PhiRuntime` contract.
 ## Failure Strategy
 
 - unknown `agentId` => throw immediately
-- unknown channel mapping (`botId`/route not configured) => throw immediately
+- unknown channel mapping (`chatId` route not configured) => throw immediately
 - missing required files (`phi.yaml`, agent workspace) => throw immediately
 - provider read/write/reload errors => throw immediately
 - no silent fallback to legacy single-agent directories
@@ -198,7 +214,7 @@ Both call the same `PhiRuntime` contract.
 ## Why This Design
 
 - simple mental model: one agent = one isolated `pi` workspace
-- easy for operators: "which bot talks to which agent" is explicit in `phi.yaml`
+- easy for operators: "which chat talks to which agent" is explicit in `phi.yaml`
 - minimal coupling: shared auth only
 - scalable: naturally extends to many agents
 - service-oriented: runtime abstraction can be exposed over network later

@@ -6,30 +6,30 @@ import {
 	AuthStorage,
 	createAgentSession,
 	DefaultResourceLoader,
+	ModelRegistry,
 	type AgentSession,
 	SessionManager,
 } from "@mariozechner/pi-coding-agent";
 
+import {
+	AgentPool,
+	type AgentSessionFactory,
+	type DisposableSession,
+} from "@phi/core/agent-pool";
+import { resolveAgentRuntimeConfig, type PhiConfig } from "@phi/core/config";
+
+export {
+	AgentPool,
+	ConversationRuntime,
+	type AgentConversationRuntime,
+	type AgentSessionFactory,
+	type DisposableSession,
+	type SessionFactory,
+} from "@phi/core/agent-pool";
+
 export const DEFAULT_AGENT_ID = "main";
 
 const AGENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
-
-export interface DisposableSession {
-	dispose(): void;
-}
-
-export type SessionFactory<TSession extends DisposableSession> =
-	() => Promise<TSession>;
-
-export type AgentSessionFactory<TSession extends DisposableSession> = (
-	agentId: string
-) => Promise<TSession>;
-
-export interface AgentConversationRuntime<TSession extends DisposableSession> {
-	getOrCreateSession(agentId: string, key: string): Promise<TSession>;
-	disposeSession(agentId: string, key: string): boolean;
-	disposeAllSessions(agentId?: string): void;
-}
 
 export interface AgentWorkspace {
 	agentId: string;
@@ -49,116 +49,9 @@ export interface AgentResourceProvider {
 	): AgentWorkspace;
 }
 
-export class ConversationRuntime<TSession extends DisposableSession> {
-	private readonly sessions = new Map<string, TSession>();
-	private readonly creatingSessions = new Map<string, Promise<TSession>>();
-
-	public constructor(
-		private readonly sessionFactory: SessionFactory<TSession>
-	) {}
-
-	public async getOrCreateSession(key: string): Promise<TSession> {
-		const existingSession = this.sessions.get(key);
-		if (existingSession) {
-			return existingSession;
-		}
-
-		const creatingSession = this.creatingSessions.get(key);
-		if (creatingSession) {
-			return creatingSession;
-		}
-
-		const createdSession = this.sessionFactory().then(
-			(session) => {
-				this.sessions.set(key, session);
-				this.creatingSessions.delete(key);
-				return session;
-			},
-			(error: unknown) => {
-				this.creatingSessions.delete(key);
-				throw error;
-			}
-		);
-
-		this.creatingSessions.set(key, createdSession);
-		return createdSession;
-	}
-
-	public disposeSession(key: string): boolean {
-		const session = this.sessions.get(key);
-		if (!session) {
-			return false;
-		}
-		session.dispose();
-		this.sessions.delete(key);
-		return true;
-	}
-
-	public disposeAllSessions(): void {
-		for (const session of this.sessions.values()) {
-			session.dispose();
-		}
-		this.sessions.clear();
-	}
-}
-
-export class PhiRuntime<TSession extends DisposableSession>
-	implements AgentConversationRuntime<TSession>
-{
-	private readonly agentRuntimes = new Map<
-		string,
-		ConversationRuntime<TSession>
-	>();
-
-	public constructor(
-		private readonly agentSessionFactory: AgentSessionFactory<TSession>
-	) {}
-
-	public async getOrCreateSession(
-		agentId: string,
-		key: string
-	): Promise<TSession> {
-		const runtime = this.getOrCreateAgentRuntime(agentId);
-		return runtime.getOrCreateSession(key);
-	}
-
-	public disposeSession(agentId: string, key: string): boolean {
-		const runtime = this.agentRuntimes.get(agentId);
-		if (!runtime) {
-			return false;
-		}
-		return runtime.disposeSession(key);
-	}
-
-	public disposeAllSessions(agentId?: string): void {
-		if (agentId) {
-			const runtime = this.agentRuntimes.get(agentId);
-			if (!runtime) {
-				return;
-			}
-			runtime.disposeAllSessions();
-			return;
-		}
-
-		for (const runtime of this.agentRuntimes.values()) {
-			runtime.disposeAllSessions();
-		}
-	}
-
-	private getOrCreateAgentRuntime(
-		agentId: string
-	): ConversationRuntime<TSession> {
-		const existingRuntime = this.agentRuntimes.get(agentId);
-		if (existingRuntime) {
-			return existingRuntime;
-		}
-		const runtime = new ConversationRuntime<TSession>(() =>
-			this.agentSessionFactory(agentId)
-		);
-		this.agentRuntimes.set(agentId, runtime);
-		return runtime;
-	}
-}
+export class PhiRuntime<
+	TSession extends DisposableSession,
+> extends AgentPool<TSession> {}
 
 function assertValidAgentId(agentId: string): void {
 	if (!AGENT_ID_PATTERN.test(agentId)) {
@@ -256,7 +149,8 @@ async function createPhiResourceLoader(
 }
 
 async function createDefaultAgentSession(
-	agentId: string
+	agentId: string,
+	phiConfig: PhiConfig
 ): Promise<AgentSession> {
 	const cwd = process.cwd();
 	const userHomeDir = homedir();
@@ -267,10 +161,26 @@ async function createDefaultAgentSession(
 		userHomeDir
 	);
 
+	const agentConfig = resolveAgentRuntimeConfig(phiConfig, agentId);
+	const authStorage = AuthStorage.create(workspace.sharedAuthFilePath);
+	const modelRegistry = new ModelRegistry(
+		authStorage,
+		join(workspace.piAgentDir, "models.json")
+	);
+	const model = modelRegistry.find(agentConfig.provider, agentConfig.model);
+	if (!model) {
+		throw new Error(
+			`Unknown model for agent ${agentId}: ${agentConfig.provider}/${agentConfig.model}`
+		);
+	}
+
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: workspace.piAgentDir,
-		authStorage: AuthStorage.create(workspace.sharedAuthFilePath),
+		authStorage,
+		modelRegistry,
+		model,
+		thinkingLevel: agentConfig.thinkingLevel,
 		sessionManager: SessionManager.create(cwd, workspace.sessionsDir),
 		resourceLoader: await createPhiResourceLoader(
 			agentId,
@@ -283,7 +193,9 @@ async function createDefaultAgentSession(
 }
 
 export function createPhiRuntime(
-	sessionFactory: AgentSessionFactory<AgentSession> = createDefaultAgentSession
+	phiConfig: PhiConfig,
+	sessionFactory: AgentSessionFactory<AgentSession> = (agentId: string) =>
+		createDefaultAgentSession(agentId, phiConfig)
 ): PhiRuntime<AgentSession> {
 	return new PhiRuntime<AgentSession>(sessionFactory);
 }
