@@ -2,83 +2,204 @@
 
 ## Goal
 
-`phi` is a thin wrapper around `pi-coding-agent`, focused on one clear responsibility:
+`phi` is a **multi-agent orchestration layer** built on top of `pi-coding-agent`.
 
-- provide a stable `phi` command surface,
-- keep `pi` runtime data isolated under `~/.phi/pi`,
-- and leave model/tool/session engine to `pi`.
+Each phi agent owns an isolated `pi` workspace, while all phi agents share one auth boundary.
 
-We intentionally keep this layer small (KISS) and fail fast.
+Core responsibilities:
 
-## Current Architecture
+- provide a stable `phi` command/API surface,
+- isolate runtime data per agent,
+- share auth state across agents,
+- keep `pi` as the execution engine,
+
+We keep design small (KISS), fail fast, and treat hot-reload as a first-class runtime capability.
+
+## Design Philosophy
+
+- KISS first: smallest viable architecture, no over-design.
+- Fast fail: propagate errors directly, no silent recovery.
+- **Hot-reload first**: rely on `pi` reload capability so `phi` configuration/prompt/context changes can take effect without service restart.
+
+## Abstracted Data Layout
+
+```text
+~/.phi/
+├─ auth/
+│  └─ auth.json               # shared by all phi agents
+├─ agents/
+│  ├─ main/
+│  │  ├─ pi/                  # isolated pi resources for agent "main"
+│  │  ├─ sessions/            # phi-level session metadata (optional)
+│  │  └─ ...                  # other per-agent phi configs
+│  └─ <agent-id>/
+│     ├─ pi/
+│     └─ ...
+└─ phi.yaml                   # global config + agent registry
+```
+
+## Resource Provider Adapter Model
+
+All agent resources must be accessed through provider adapters.
+
+Core abstractions:
+
+- `AgentResourceProvider`: read/write agent resources (`phi.yaml`, per-agent config, context, prompts, session metadata)
+- `AuthProvider`: shared auth boundary (`auth/auth.json`)
+- `WorkspaceProvider`: resolve/provision per-agent workspace (`agents/<agentId>/pi`)
+
+`PhiRuntime` depends on these interfaces only.
+
+### Built-in Implementation
+
+- `FileSystemResourceProvider`
+- Implements exactly this layout:
+  - `~/.phi/auth/auth.json`
+  - `~/.phi/agents/<agentId>/...`
+  - `~/.phi/phi.yaml`
+
+### Extension-based Providers
+
+Additional providers are delivered via the same extension mechanism philosophy as `pi`.
+
+Examples:
+
+- HTTP-backed resource provider
+- database/object-storage backed provider
+- hybrid cache + remote provider
+
+Extensions should support **hot reload** too. 
+
+## Architecture
 
 ### 1) Entry Layer
 
 - **File**: `index.ts`
 - Responsibility:
-  - build runtime (`createPhiRuntime()`)
-  - build CLI app (`tui(...)`)
-  - route to TUI command (`runTuiCommand(...)`)
+  - build `PhiRuntime`
+  - build CLI app
+  - route commands to adapters
 
-This file is only composition glue, no business logic.
+Composition only, no business logic.
 
-### 2) Command Wrapper Layer
+### 2) Command Adapter Layer
 
-- **File**: `src/tui.ts`
+- **Files**: `src/commands/*`
 - Responsibility:
-  - define `phi tui`
-  - default command behavior (no args => same as `tui`)
-  - unknown command => throw error directly (fast fail)
+  - parse `agentId` + conversation key from command input
+  - call runtime abstraction only
+  - fail fast on unknown command / unknown agent
 
-### 3) TUI Adapter Layer
+### 3) Agent Runtime Orchestration Layer
 
-- **File**: `src/commands/tui.ts`
+- **Core abstraction**: `PhiRuntime`
 - Responsibility:
-  - acquire session from runtime by key (`tui:default`)
-  - run `InteractiveMode(session)` from `pi`
-  - always dispose session after mode exits
+  - manage per-agent runtime instance
+  - provide keyed conversation/session lifecycle per agent
+  - de-duplicate concurrent session creation
 
-This is the adapter from our command system to `pi` interactive mode.
+Recommended shape:
 
-### 4) Runtime Layer
+- `AgentRegistry` (read from `phi.yaml`)
+- `AgentWorkspaceResolver` (resolve paths under `~/.phi/agents/<agentId>`)
+- `AgentRuntimePool` (`Map<agentId, ConversationRuntime>`)
 
-- **File**: `src/core/runtime.ts`
+### 4) Pi Session Factory Layer
+
 - Responsibility:
-  - session lifecycle abstraction (`ConversationRuntime<TSession>`)
-  - de-duplicate concurrent session creation by conversation key
-  - default session factory based on `createAgentSession(...)`
+  - create `pi` session for one specific agent
+  - set `agentDir` to `~/.phi/agents/<agentId>/pi`
+  - bind shared auth from `~/.phi/auth/auth.json`
+  - keep context loading rules consistent and explicit
 
-## How We Wrap `pi`
+No custom engine logic; `pi` still runs the loop.
 
-We do not reimplement `pi` core engine. We configure and constrain it:
+## Human Interface Layer
 
-- use `createAgentSession` + `DefaultResourceLoader`
-- set `agentDir` to: `~/.phi/pi`
-- disable legacy global skills source: `~/.agents/skills`
-- disable AGENTS.md auto-discovery by overriding `agentsFiles`
-- load context only from:
-  - `~/.phi/context/**/*.md`
-  - `<cwd>/.phi/context/**/*.md`
+We expose phi to humans through adapters, not through direct runtime internals.
 
-So `phi` owns the integration boundary, while `pi` still executes the agent loop.
+### 1) TUI
 
-## Data Boundary
+- Command: `phi tui`
+- Agent selection: `--agent <agentId>`
+- Default agent: `main`
 
-- `~/.phi`: phi-owned data namespace
-- `~/.phi/pi`: pi-compatible runtime data (settings/auth/sessions/models)
+Examples:
 
-This avoids mixing with default `~/.pi/agent`.
+- `phi tui` → starts TUI with `main`
+- `phi tui --agent support` → starts TUI with `support`
 
-## Non-Goals (Current)
+### 2) Channels (Telegram/IM/HTTP webhook)
 
-- no custom agent engine
-- no custom TUI framework
-- no extra channel adapters in this stage
+Channels are also adapters. They map inbound user messages to the right `agentId` and conversation key.
 
-## Extension Direction
+Mapping is configured in `phi.yaml`, for example:
 
-Future channels (Telegram, etc.) should reuse:
+```yaml
+channels:
+  telegram:
+    bots:
+      "123456789":
+        agentId: main
+```
 
-- `ConversationRuntime` for keyed session lifecycle
-- same `createAgentSession` factory constraints
-- channel-specific adapter layer similar to `src/commands/tui.ts`
+Runtime routing flow:
+
+1. receive inbound event (`provider`, `botId`, `chatId`, `userId`, message)
+2. resolve `agentId` from channel mapping in `phi.yaml`
+3. build deterministic conversation key (e.g. `telegram:123456789:chat:<chatId>:user:<userId>`)
+4. get/create session from `PhiRuntime(agentId, conversationKey)`
+5. forward message to `pi` session
+
+This keeps user-facing behavior simple while preserving strict multi-agent isolation.
+
+## Isolation Model
+
+Isolation unit = `agentId`.
+
+Each agent has:
+
+- isolated `pi` data directory,
+- isolated session namespace,
+- isolated per-agent config.
+
+Shared across all agents:
+
+- `auth/auth.json`,
+- global `phi.yaml` registry/policy.
+
+This gives clear security and operational boundaries, and enables future remote control.
+
+## Service-Ready Abstraction
+
+All `agents.main` behavior must be accessed via abstract runtime interfaces, not direct filesystem coupling.
+
+This allows hard cutover from local CLI-only flow to network-managed flow without changing business semantics:
+
+- local adapter (CLI/TUI)
+- remote adapter (HTTP/IM/WebSocket)
+
+Both call the same `PhiRuntime` contract.
+
+## Failure Strategy
+
+- unknown `agentId` => throw immediately
+- unknown channel mapping (`botId`/route not configured) => throw immediately
+- missing required files (`phi.yaml`, agent workspace) => throw immediately
+- provider read/write/reload errors => throw immediately
+- no silent fallback to legacy single-agent directories
+- no backward compatibility layer (hard cutover)
+
+## Non-Goals
+
+- do not reimplement `pi` engine
+- do not hide upstream errors
+- do not add compatibility shims for old `~/.phi/pi` layout
+
+## Why This Design
+
+- simple mental model: one agent = one isolated `pi` workspace
+- easy for operators: "which bot talks to which agent" is explicit in `phi.yaml`
+- minimal coupling: shared auth only
+- scalable: naturally extends to many agents
+- service-oriented: runtime abstraction can be exposed over network later
