@@ -5,6 +5,7 @@ Project `phi` is a `openclaw` like agent running behind IMs
 ## Law of agentic
 
 - NEVER EVER `git checkout` or `git reset` anything, if you feel it's absolutely nessacery, ask me to do that
+- For better international DX, use English in all documents
 
 ## Using Bun instead of Node.js
 

@@ -1,0 +1,48 @@
+# Copy this file to ~/.phi/phi.yaml and adjust values for your environment.
+#
+# phi.yaml - Master configuration for phi
+#
+# Architecture:
+#   Service → Runtime → [Chat ↔ Agent(pi)]
+#
+# - agents: Agent templates (pi configurations)
+# - chats: User chat definitions (with routes to services)
+# - services: External interfaces (Telegram, TUI, HTTP, etc.)
+
+---
+
+# Agent templates - reusable pi configurations
+agents:
+  main:
+    provider: openai
+    model: gpt-5.2
+    thinkingLevel: medium
+    skills:
+      - code-executor
+      - file-reader
+    extensions:
+      - sub-agents
+
+  support:
+    provider: openai
+    model: gpt-5-mini
+    thinkingLevel: off
+
+# Chats - User resource containers
+chats:
+  user-alice:
+    # Workspace where .phi/ (sessions, memory, logs) lives
+    workspace: "~/phi/workspaces/alice"
+    # Bind to agent template
+    agent: main
+    # Routes - which services this chat connects to
+    routes:
+      telegram:
+        id: <chat-id>
+        token: <telegram-token>
+      discord:
+        bot: <bot-id>
+
+# Service - global configurations
+http:
+  port: 3000

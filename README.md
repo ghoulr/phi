@@ -1,79 +1,75 @@
 # phi
 
-Phi is a homemade [openclaw](https://github.com/openclaw/openclaw) based on [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev).
+Phi is a multi-user, multi-agent conversation system built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev).
 
-## Current status
+## Architecture
 
-- ✅ Multi-agent runtime abstraction is in place (`agentId`-scoped sessions).
-- ✅ TUI channel routing is config-driven via `channels.tui.agent`.
-- ✅ Telegram channel adapter is implemented with polling (`phi service`).
+See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 
-## Run
+```
+                    ┌─────────┐
+                    │ Service │ ← All external interfaces (IM, API, CLI, etc.)
+                    └────┬────┘
+                         │ routes
+                    ┌────▼────┐
+              ┌─────┤ Runtime ├─────┐
+              │     └────┬────┘     │
+              │          │          │
+         ┌────▼────┐     │     ┌────▼─────┐
+         │  Chat   │◄────┘     │ Agent(pi)│
+         └─────────┘           └──────────┘
+```
+
+## Quick Start
 
 1. Configure any supported model credential (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`).
-2. Prepare phi workspace layout:
+
+2. Copy [phi.example.yaml](./phi.example.yaml) to `~/.phi/phi.yaml` and adjust for your environment:
+
+```bash
+cp phi.example.yaml ~/.phi/phi.yaml
+```
+
+3. Directory layout:
 
 ```text
 ~/.phi/
-├─ auth/
-│  └─ auth.json
-├─ agents/
-│  └─ main/
-│     ├─ pi/
-│     └─ sessions/
-└─ phi.yaml
+├─ phi.yaml               # Master configuration
+├─ pi/                    # TUI pi configuration (skills, prompts, etc.)
+└─ auth/
+   └─ auth.json
 ```
 
-Example `phi.yaml`:
+Chat workspaces are configured in `phi.yaml`:
 
-```yaml
-agents:
-  main:
-    model: big-pickle
-    provider: opencode
-    thinkingLevel: medium
-
-channels:
-  tui:
-    agent: main
-  telegram:
-    chats:
-      "<telegram-chat-id>":
-        enabled: true
-        agent: main
-        token: <telegram-bot-token>
+```text
+<chat-workspace>/
+└─ .phi/
+   ├─ sessions/            # pi sessions
+   ├─ memory/
+   │  ├─ MEMORY.md
+   │  └─ YYYY-MM-DD.md
+   └─ logs/               # Message logs
 ```
 
-3. Phi uses per-agent pi data dir (`~/.phi/agents/<agentId>/pi`) and shared auth (`~/.phi/auth/auth.json`).
-4. Legacy global skills from `~/.agents/skills` are disabled; use per-agent skills under `~/.phi/agents/<agentId>/pi/skills` instead.
-5. Start TUI:
+## Run
+
+### TUI (Local Terminal)
+
+TUI runs as an independent pi instance for local ops:
 
 ```bash
 bun index.ts tui
 ```
 
-By default, TUI agent is resolved from `channels.tui.agent` in `~/.phi/phi.yaml`.
+In TUI, use `/login` directly when authentication is needed.
 
-For debugging a specific Telegram chat route, override with both `--channel` and `--chat`:
+### Service
 
-```bash
-bun index.ts tui --channel telegram --chat=<telegram-chat-id>
-```
-
-When chat override is provided, TUI resolves agent from `channels.<channel>.chats.<chatId>.agent` (currently `telegram` is supported) and uses conversation key `telegram:chat:<chatId>`.
-
-Start service (currently Telegram polling channel):
+Start the service (Telegram, HTTP, etc.):
 
 ```bash
 bun index.ts service
 ```
 
-Service reads all channel configs from the shared `~/.phi/phi.yaml`.
-
-You can also run default command (same as `tui`):
-
-```bash
-bun index.ts
-```
-
-In TUI, use `/login` directly when authentication is needed.
+Service reads all configurations from `~/.phi/phi.yaml`.
