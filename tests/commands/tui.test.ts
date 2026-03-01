@@ -25,7 +25,7 @@ describe("runTuiCommand", () => {
 		const fakeSession = createFakeAgentSession();
 		const createdForAgents: string[] = [];
 		const runtime = new PhiRuntime<AgentSession>(
-			async (agentId: string) => {
+			async (agentId: string, _conversationKey: string) => {
 				createdForAgents.push(agentId);
 				return fakeSession;
 			}
@@ -40,9 +40,31 @@ describe("runTuiCommand", () => {
 		expect(createdForAgents).toEqual(["support"]);
 	});
 
+	it("uses provided conversation key", async () => {
+		const fakeSession = createFakeAgentSession();
+		const createdForConversations: string[] = [];
+		const runtime = new PhiRuntime<AgentSession>(
+			async (_agentId: string, conversationKey: string) => {
+				createdForConversations.push(conversationKey);
+				return fakeSession;
+			}
+		);
+
+		await runTuiCommand(
+			runtime,
+			"main",
+			async () => {},
+			"telegram:chat:-10001"
+		);
+
+		expect(createdForConversations).toEqual(["telegram:chat:-10001"]);
+	});
+
 	it("always disposes the tui session when mode runner fails", async () => {
 		const fakeSession = createFakeAgentSession();
-		const runtime = new PhiRuntime<AgentSession>(async () => fakeSession);
+		const runtime = new PhiRuntime<AgentSession>(
+			async (_agentId: string, _conversationKey: string) => fakeSession
+		);
 		const disposeSpy = fakeSession as unknown as FakeSession;
 
 		await expect(

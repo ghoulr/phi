@@ -5,7 +5,7 @@ Phi is a homemade [openclaw](https://github.com/openclaw/openclaw) based on [pi]
 ## Current status
 
 - ✅ Multi-agent runtime abstraction is in place (`agentId`-scoped sessions).
-- ✅ `phi tui --agent <agentId>` is implemented (default agent: `main`).
+- ✅ TUI channel routing is config-driven via `channels.tui.agent`.
 - ✅ Telegram channel adapter is implemented with polling (`phi service`).
 
 ## Run
@@ -34,6 +34,8 @@ agents:
     thinkingLevel: medium
 
 channels:
+  tui:
+    agent: main
   telegram:
     chats:
       "<telegram-chat-id>":
@@ -47,14 +49,18 @@ channels:
 5. Start TUI:
 
 ```bash
-bun run tui
+bun index.ts tui
 ```
 
-Run with a specific agent:
+By default, TUI agent is resolved from `channels.tui.agent` in `~/.phi/phi.yaml`.
+
+For debugging a specific Telegram chat route, override with both `--channel` and `--chat`:
 
 ```bash
-bun run tui -- --agent support
+bun index.ts tui --channel telegram --chat=<telegram-chat-id>
 ```
+
+When chat override is provided, TUI resolves agent from `channels.<channel>.chats.<chatId>.agent` (currently `telegram` is supported) and uses conversation key `telegram:chat:<chatId>`.
 
 Start service (currently Telegram polling channel):
 

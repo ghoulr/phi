@@ -29,8 +29,13 @@ export interface TelegramChannelConfig {
 	chats: Record<string, TelegramChatChannelConfig>;
 }
 
+export interface TuiChannelConfig {
+	agent: string;
+}
+
 export interface PhiChannelsConfig {
 	telegram?: TelegramChannelConfig;
+	tui?: TuiChannelConfig;
 }
 
 export interface PhiConfig {
@@ -49,6 +54,11 @@ export interface ResolvedAgentRuntimeConfig {
 	provider: string;
 	model: string;
 	thinkingLevel: PhiThinkingLevel;
+}
+
+export interface TuiChatOverride {
+	channel: string;
+	chatId: string;
 }
 
 const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
@@ -125,6 +135,68 @@ export function resolveTelegramChatServiceConfigs(
 	}
 
 	return entries;
+}
+
+function resolveTelegramChatAgentId(
+	phiConfig: PhiConfig,
+	chatId: string
+): string {
+	const chats = phiConfig.channels?.telegram?.chats;
+	if (!chats) {
+		throw new Error(
+			"Missing channels.telegram.chats configuration in phi config."
+		);
+	}
+
+	const chatConfig = chats[chatId];
+	if (!chatConfig) {
+		throw new Error(`Unknown telegram chat mapping for chat id: ${chatId}`);
+	}
+	if (chatConfig.enabled === false) {
+		throw new Error(`Telegram chat is disabled: ${chatId}`);
+	}
+	if (!chatConfig.agent) {
+		throw new Error(
+			`Invalid telegram chat mapping for chat id ${chatId}: missing agent`
+		);
+	}
+	return chatConfig.agent;
+}
+
+function resolveChannelChatAgentId(
+	phiConfig: PhiConfig,
+	override: TuiChatOverride
+): string {
+	if (override.channel.length === 0) {
+		throw new Error("Invalid tui chat override: empty channel");
+	}
+	if (override.chatId.length === 0) {
+		throw new Error("Invalid tui chat override: empty chat id");
+	}
+	if (override.channel === "telegram") {
+		return resolveTelegramChatAgentId(phiConfig, override.chatId);
+	}
+	throw new Error(
+		`Unsupported tui chat override channel: ${override.channel}`
+	);
+}
+
+export function resolveTuiAgentId(
+	phiConfig: PhiConfig,
+	override?: TuiChatOverride
+): string {
+	if (override) {
+		return resolveChannelChatAgentId(phiConfig, override);
+	}
+
+	const tuiConfig = phiConfig.channels?.tui;
+	if (!tuiConfig) {
+		throw new Error("Missing channels.tui configuration in phi config.");
+	}
+	if (!tuiConfig.agent) {
+		throw new Error("Invalid channels.tui configuration: missing agent");
+	}
+	return tuiConfig.agent;
 }
 
 export function resolveAgentRuntimeConfig(

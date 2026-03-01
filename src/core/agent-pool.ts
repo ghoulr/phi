@@ -2,11 +2,13 @@ export interface DisposableSession {
 	dispose(): void;
 }
 
-export type SessionFactory<TSession extends DisposableSession> =
-	() => Promise<TSession>;
+export type SessionFactory<TSession extends DisposableSession> = (
+	key: string
+) => Promise<TSession>;
 
 export type AgentSessionFactory<TSession extends DisposableSession> = (
-	agentId: string
+	agentId: string,
+	key: string
 ) => Promise<TSession>;
 
 export interface AgentConversationRuntime<TSession extends DisposableSession> {
@@ -34,7 +36,7 @@ export class ConversationRuntime<TSession extends DisposableSession> {
 			return creatingSession;
 		}
 
-		const createdSession = this.sessionFactory().then(
+		const createdSession = this.sessionFactory(key).then(
 			(session) => {
 				this.sessions.set(key, session);
 				this.creatingSessions.delete(key);
@@ -118,8 +120,8 @@ export class AgentPool<TSession extends DisposableSession>
 		if (existingRuntime) {
 			return existingRuntime;
 		}
-		const runtime = new ConversationRuntime<TSession>(() =>
-			this.agentSessionFactory(agentId)
+		const runtime = new ConversationRuntime<TSession>((key: string) =>
+			this.agentSessionFactory(agentId, key)
 		);
 		this.agentRuntimes.set(agentId, runtime);
 		return runtime;

@@ -3,10 +3,7 @@ import {
 	type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 
-import {
-	DEFAULT_AGENT_ID,
-	type AgentConversationRuntime,
-} from "@phi/core/runtime";
+import type { AgentConversationRuntime } from "@phi/core/runtime";
 
 export const TUI_CONVERSATION_KEY = "tui:default";
 
@@ -19,16 +16,14 @@ export async function runInteractiveTui(session: AgentSession): Promise<void> {
 
 export async function runTuiCommand(
 	runtime: AgentConversationRuntime<AgentSession>,
-	agentId: string = DEFAULT_AGENT_ID,
-	runMode: TuiModeRunner = runInteractiveTui
+	agentId: string,
+	runMode: TuiModeRunner = runInteractiveTui,
+	conversationKey: string = TUI_CONVERSATION_KEY
 ): Promise<void> {
-	const session = await runtime.getOrCreateSession(
-		agentId,
-		TUI_CONVERSATION_KEY
-	);
+	const session = await runtime.getOrCreateSession(agentId, conversationKey);
 	try {
 		await runMode(session);
 	} finally {
-		runtime.disposeSession(agentId, TUI_CONVERSATION_KEY);
+		runtime.disposeSession(agentId, conversationKey);
 	}
 }

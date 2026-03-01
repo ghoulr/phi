@@ -27,9 +27,21 @@ export {
 	type SessionFactory,
 } from "@phi/core/agent-pool";
 
-export const DEFAULT_AGENT_ID = "main";
-
 const AGENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+function encodeConversationKey(conversationKey: string): string {
+	if (conversationKey.length === 0) {
+		throw new Error("Conversation key must not be empty.");
+	}
+	return Buffer.from(conversationKey, "utf-8").toString("base64url");
+}
+
+function getConversationSessionsDir(
+	sessionsDir: string,
+	conversationKey: string
+): string {
+	return join(sessionsDir, encodeConversationKey(conversationKey));
+}
 
 export interface AgentWorkspace {
 	agentId: string;
@@ -150,6 +162,7 @@ async function createPhiResourceLoader(
 
 async function createDefaultAgentSession(
 	agentId: string,
+	conversationKey: string,
 	phiConfig: PhiConfig
 ): Promise<AgentSession> {
 	const cwd = process.cwd();
@@ -174,6 +187,11 @@ async function createDefaultAgentSession(
 		);
 	}
 
+	const conversationSessionsDir = getConversationSessionsDir(
+		workspace.sessionsDir,
+		conversationKey
+	);
+
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir: workspace.piAgentDir,
@@ -181,7 +199,10 @@ async function createDefaultAgentSession(
 		modelRegistry,
 		model,
 		thinkingLevel: agentConfig.thinkingLevel,
-		sessionManager: SessionManager.create(cwd, workspace.sessionsDir),
+		sessionManager: SessionManager.continueRecent(
+			cwd,
+			conversationSessionsDir
+		),
 		resourceLoader: await createPhiResourceLoader(
 			agentId,
 			resourceProvider,
@@ -194,8 +215,10 @@ async function createDefaultAgentSession(
 
 export function createPhiRuntime(
 	phiConfig: PhiConfig,
-	sessionFactory: AgentSessionFactory<AgentSession> = (agentId: string) =>
-		createDefaultAgentSession(agentId, phiConfig)
+	sessionFactory: AgentSessionFactory<AgentSession> = (
+		agentId: string,
+		conversationKey: string
+	) => createDefaultAgentSession(agentId, conversationKey, phiConfig)
 ): PhiRuntime<AgentSession> {
 	return new PhiRuntime<AgentSession>(sessionFactory);
 }

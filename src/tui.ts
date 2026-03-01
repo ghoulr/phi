@@ -1,29 +1,64 @@
 import cac, { type CAC } from "cac";
 
-import { DEFAULT_AGENT_ID } from "@phi/core/runtime";
+export interface TuiChatRouteOptions {
+	channel: string;
+	chatId: string;
+}
 
 export interface TuiDependencies {
-	runTui(agentId: string): Promise<void>;
+	runTui(route?: TuiChatRouteOptions): Promise<void>;
 	runService(): Promise<void>;
 }
 
 interface TuiCommandOptions {
-	agent?: string;
+	chat?: string | number;
+	channel?: string;
 }
 
-function getAgentId(options: TuiCommandOptions): string {
-	return options.agent ?? DEFAULT_AGENT_ID;
+function resolveTuiRouteOptions(
+	options: TuiCommandOptions
+): TuiChatRouteOptions | undefined {
+	const channel = options.channel;
+	const chatId =
+		options.chat === undefined ? undefined : String(options.chat);
+
+	if (channel === undefined && chatId === undefined) {
+		return undefined;
+	}
+
+	if (channel === undefined) {
+		throw new Error(
+			"TUI chat override requires --channel when --chat is provided."
+		);
+	}
+	if (channel.length === 0) {
+		throw new Error(
+			"TUI chat override requires a non-empty --channel value."
+		);
+	}
+	if (chatId === undefined) {
+		throw new Error(
+			"TUI chat override requires --chat when --channel is provided."
+		);
+	}
+	if (chatId.length === 0) {
+		throw new Error("TUI chat override requires a non-empty --chat value.");
+	}
+
+	return {
+		channel,
+		chatId,
+	};
 }
 
 export function tui(dependencies: TuiDependencies): CAC {
 	const app = cac("phi");
 
 	app.command("tui", "Start phi in TUI mode")
-		.option("--agent <agentId>", "Run with a specific phi agent", {
-			default: DEFAULT_AGENT_ID,
-		})
+		.option("--channel <channel>", "Channel for TUI chat override")
+		.option("--chat <chatId>", "Chat id for TUI chat override")
 		.action(async (options: TuiCommandOptions) => {
-			await dependencies.runTui(getAgentId(options));
+			await dependencies.runTui(resolveTuiRouteOptions(options));
 		});
 
 	app.command(
@@ -33,15 +68,16 @@ export function tui(dependencies: TuiDependencies): CAC {
 		await dependencies.runService();
 	});
 
-	app.command("[...args]", "Run default command").action(
-		async (args: string[]) => {
+	app.command("[...args]", "Run default command")
+		.option("--channel <channel>", "Channel for TUI chat override")
+		.option("--chat <chatId>", "Chat id for TUI chat override")
+		.action(async (args: string[], options: TuiCommandOptions) => {
 			if (args.length === 0) {
-				await dependencies.runTui(DEFAULT_AGENT_ID);
+				await dependencies.runTui(resolveTuiRouteOptions(options));
 				return;
 			}
 			throw new Error(`Unknown command: ${args[0]}`);
-		}
-	);
+		});
 
 	app.help();
 

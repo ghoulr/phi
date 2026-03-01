@@ -48,6 +48,17 @@ describe("ConversationRuntime", () => {
 		expect(session1).toBe(session2);
 	});
 
+	it("passes conversation key to the session factory", async () => {
+		const createdKeys: string[] = [];
+		const runtime = new ConversationRuntime<FakeSession>(async (key) => {
+			createdKeys.push(key);
+			return createFakeSession("s1");
+		});
+
+		await runtime.getOrCreateSession("telegram:chat:42");
+		expect(createdKeys).toEqual(["telegram:chat:42"]);
+	});
+
 	it("retries session creation after a failed creation", async () => {
 		let createCount = 0;
 		let shouldFail = true;
@@ -79,11 +90,13 @@ describe("ConversationRuntime", () => {
 
 describe("PhiRuntime", () => {
 	it("isolates session creation by agent id", async () => {
-		const createCalls: string[] = [];
-		const runtime = new PhiRuntime<FakeSession>(async (agentId: string) => {
-			createCalls.push(agentId);
-			return createFakeSession(`${agentId}-${createCalls.length}`);
-		});
+		const createCalls: Array<{ agentId: string; key: string }> = [];
+		const runtime = new PhiRuntime<FakeSession>(
+			async (agentId: string, key: string) => {
+				createCalls.push({ agentId, key });
+				return createFakeSession(`${agentId}-${key}`);
+			}
+		);
 
 		const mainSession = await runtime.getOrCreateSession(
 			"main",
@@ -94,13 +107,18 @@ describe("PhiRuntime", () => {
 			"tui:default"
 		);
 
-		expect(mainSession.id).toBe("main-1");
-		expect(supportSession.id).toBe("support-2");
+		expect(mainSession.id).toBe("main-tui:default");
+		expect(supportSession.id).toBe("support-tui:default");
+		expect(createCalls).toEqual([
+			{ agentId: "main", key: "tui:default" },
+			{ agentId: "support", key: "tui:default" },
+		]);
 	});
 
 	it("returns false when disposing unknown agent runtime", () => {
-		const runtime = new PhiRuntime<FakeSession>(async () =>
-			createFakeSession("unused")
+		const runtime = new PhiRuntime<FakeSession>(
+			async (_agentId: string, _key: string) =>
+				createFakeSession("unused")
 		);
 		expect(runtime.disposeSession("unknown", "tui:default")).toBe(false);
 	});

@@ -122,13 +122,22 @@ We expose phi to humans through adapters, not through direct runtime internals.
 ### 1) TUI
 
 - Command: `phi tui`
-- Agent selection: `--agent <agentId>`
-- Default agent: `main`
+- Default routing: `channels.tui.agent` in `phi.yaml`
+- Optional debug override: `--channel <channel> --chat <chatId>` → route by `channels.<channel>.chats.<chatId>.agent` (currently `telegram`)
 
-Examples:
+Example:
 
-- `phi tui` → starts TUI with `main`
-- `phi tui --agent support` → starts TUI with `support`
+```yaml
+channels:
+  tui:
+    agent: main
+  telegram:
+    chats:
+      "-1001234567890":
+        enabled: true
+        agent: support
+        token: <telegram-bot-token>
+```
 
 ### 2) Service Command
 

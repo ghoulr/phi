@@ -8,6 +8,7 @@ import {
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveTelegramChatServiceConfigs,
+	resolveTuiAgentId,
 } from "@phi/core/config";
 
 describe("phi config", () => {
@@ -115,6 +116,166 @@ describe("phi config", () => {
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
 		}
+	});
+
+	it("resolves tui agent id from phi config", () => {
+		expect(
+			resolveTuiAgentId({
+				channels: {
+					tui: {
+						agent: "support",
+					},
+				},
+			})
+		).toBe("support");
+	});
+
+	it("resolves tui agent id from telegram chat when override is provided", () => {
+		expect(
+			resolveTuiAgentId(
+				{
+					channels: {
+						telegram: {
+							chats: {
+								"-10001": {
+									agent: "support",
+									token: "bot-token",
+								},
+							},
+						},
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "telegram", chatId: "-10001" }
+			)
+		).toBe("support");
+	});
+
+	it("fails when tui channel config is missing", () => {
+		expect(() => resolveTuiAgentId({ channels: {} })).toThrow(
+			"Missing channels.tui configuration in phi config."
+		);
+	});
+
+	it("fails when telegram chats config is missing for chat override", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "telegram", chatId: "-10001" }
+			)
+		).toThrow(
+			"Missing channels.telegram.chats configuration in phi config."
+		);
+	});
+
+	it("fails when chat override channel is empty", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "", chatId: "-10001" }
+			)
+		).toThrow("Invalid tui chat override: empty channel");
+	});
+
+	it("fails when chat override is empty", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						telegram: {
+							chats: {},
+						},
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "telegram", chatId: "" }
+			)
+		).toThrow("Invalid tui chat override: empty chat id");
+	});
+
+	it("fails when chat override channel is unsupported", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "discord", chatId: "1" }
+			)
+		).toThrow("Unsupported tui chat override channel: discord");
+	});
+
+	it("fails when chat override is unknown", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						telegram: {
+							chats: {},
+						},
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "telegram", chatId: "-10001" }
+			)
+		).toThrow("Unknown telegram chat mapping for chat id: -10001");
+	});
+
+	it("fails when chat override is disabled", () => {
+		expect(() =>
+			resolveTuiAgentId(
+				{
+					channels: {
+						telegram: {
+							chats: {
+								"-10001": {
+									enabled: false,
+									agent: "support",
+									token: "bot-token",
+								},
+							},
+						},
+						tui: {
+							agent: "main",
+						},
+					},
+				},
+				{ channel: "telegram", chatId: "-10001" }
+			)
+		).toThrow("Telegram chat is disabled: -10001");
+	});
+
+	it("fails when tui channel agent is missing", () => {
+		expect(() =>
+			resolveTuiAgentId({
+				channels: {
+					tui: {
+						agent: "",
+					},
+				},
+			})
+		).toThrow("Invalid channels.tui configuration: missing agent");
 	});
 
 	it("resolves agent runtime config from phi config", () => {

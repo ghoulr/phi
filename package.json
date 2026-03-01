@@ -14,7 +14,6 @@
     "typescript": "^5"
   },
   "scripts": {
-    "tui": "bun index.ts tui",
     "prepare": "husky",
     "lint-staged": "lint-staged",
     "check": "biome format --write . && biome lint . && tsgo --noEmit",
