@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
 
 import { parse } from "yaml";
+
+import { getPhiConfigFilePath } from "@phi/core/paths";
 
 export type PhiThinkingLevel =
 	| "off"
@@ -77,7 +78,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function getDefaultPhiConfigFilePath(
 	userHomeDir: string = homedir()
 ): string {
-	return join(userHomeDir, ".phi", "phi.yaml");
+	return getPhiConfigFilePath(userHomeDir);
 }
 
 export function loadPhiConfig(configFilePath: string): PhiConfig {

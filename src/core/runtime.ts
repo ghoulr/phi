@@ -17,6 +17,11 @@ import {
 	type DisposableSession,
 } from "@phi/core/agent-pool";
 import { resolveAgentRuntimeConfig, type PhiConfig } from "@phi/core/config";
+import {
+	getPhiConfigFilePath,
+	getPhiDir,
+	getPhiSharedAuthFilePath,
+} from "@phi/core/paths";
 
 export {
 	AgentPool,
@@ -71,10 +76,6 @@ function assertValidAgentId(agentId: string): void {
 	}
 }
 
-function getPhiHomeDir(userHomeDir: string = homedir()): string {
-	return join(userHomeDir, ".phi");
-}
-
 function getLegacyAgentsSkillsDir(userHomeDir: string = homedir()): string {
 	return join(userHomeDir, ".agents", "skills");
 }
@@ -105,8 +106,8 @@ export class FileSystemResourceProvider implements AgentResourceProvider {
 	): AgentWorkspace {
 		assertValidAgentId(agentId);
 
-		const phiDir = getPhiHomeDir(userHomeDir);
-		const phiConfigFilePath = join(phiDir, "phi.yaml");
+		const phiDir = getPhiDir(userHomeDir);
+		const phiConfigFilePath = getPhiConfigFilePath(userHomeDir);
 		if (!existsSync(phiConfigFilePath)) {
 			throw new Error(`Missing phi config file: ${phiConfigFilePath}`);
 		}
@@ -128,7 +129,7 @@ export class FileSystemResourceProvider implements AgentResourceProvider {
 			agentRootDir,
 			piAgentDir,
 			sessionsDir: join(agentRootDir, "sessions"),
-			sharedAuthFilePath: join(phiDir, "auth", "auth.json"),
+			sharedAuthFilePath: getPhiSharedAuthFilePath(userHomeDir),
 		};
 	}
 }
