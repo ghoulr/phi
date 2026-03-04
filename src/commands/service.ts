@@ -4,20 +4,21 @@ import {
 	startTelegramPollingBot,
 	type ResolvedTelegramPollingBotConfig,
 	type RunningTelegramPollingBot,
-} from "@phi/commands/telegram";
+	type TelegramRouteTarget,
+} from "@phi/services/telegram";
 import {
 	resolveTelegramChatServiceConfigs,
 	type PhiConfig,
 	type ResolvedTelegramChatServiceConfig,
 } from "@phi/core/config";
-import type { AgentConversationRuntime } from "@phi/core/runtime";
+import type { ChatSessionRuntime } from "@phi/core/runtime";
 
 export interface ServiceCommandDependencies {
 	resolveTelegramChats(
 		phiConfig: PhiConfig
 	): ResolvedTelegramChatServiceConfig[];
 	startTelegramBot(
-		runtime: AgentConversationRuntime<AgentSession>,
+		runtime: ChatSessionRuntime<AgentSession>,
 		config: ResolvedTelegramPollingBotConfig
 	): Promise<RunningTelegramPollingBot>;
 }
@@ -29,7 +30,7 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 		return resolveTelegramChatServiceConfigs(phiConfig);
 	},
 	startTelegramBot(
-		runtime: AgentConversationRuntime<AgentSession>,
+		runtime: ChatSessionRuntime<AgentSession>,
 		config: ResolvedTelegramPollingBotConfig
 	): Promise<RunningTelegramPollingBot> {
 		return startTelegramPollingBot(runtime, config);
@@ -39,25 +40,33 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 function buildTelegramBotConfigs(
 	chatConfigs: ResolvedTelegramChatServiceConfig[]
 ): ResolvedTelegramPollingBotConfig[] {
-	const groupedRoutes = new Map<string, Record<string, string>>();
+	const groupedRoutes = new Map<
+		string,
+		Record<string, TelegramRouteTarget>
+	>();
 
 	for (const chatConfig of chatConfigs) {
-		const existingRoutes = groupedRoutes.get(chatConfig.token);
-		if (existingRoutes) {
-			existingRoutes[chatConfig.chatId] = chatConfig.agentId;
-			continue;
+		let routes = groupedRoutes.get(chatConfig.token);
+		if (!routes) {
+			routes = {};
+			groupedRoutes.set(chatConfig.token, routes);
 		}
-		groupedRoutes.set(chatConfig.token, {
-			[chatConfig.chatId]: chatConfig.agentId,
-		});
+
+		if (routes[chatConfig.telegramChatId]) {
+			throw new Error(
+				`Duplicate telegram route for token ${chatConfig.token} and chat id ${chatConfig.telegramChatId}`
+			);
+		}
+		routes[chatConfig.telegramChatId] = {
+			chatId: chatConfig.chatId,
+			workspace: chatConfig.workspace,
+		};
 	}
 
-	return Array.from(groupedRoutes.entries()).map(
-		([token, chatAgentRoutes]) => ({
-			token,
-			chatAgentRoutes,
-		})
-	);
+	return Array.from(groupedRoutes.entries()).map(([token, chatRoutes]) => ({
+		token,
+		chatRoutes,
+	}));
 }
 
 async function stopAllBots(bots: RunningTelegramPollingBot[]): Promise<void> {
@@ -69,7 +78,7 @@ async function stopAllBots(bots: RunningTelegramPollingBot[]): Promise<void> {
 }
 
 export async function runServiceCommand(
-	runtime: AgentConversationRuntime<AgentSession>,
+	runtime: ChatSessionRuntime<AgentSession>,
 	phiConfig: PhiConfig,
 	dependencies: ServiceCommandDependencies = defaultServiceCommandDependencies
 ): Promise<void> {

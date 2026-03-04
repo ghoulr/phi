@@ -20,33 +20,32 @@ export interface PhiAgentConfig {
 	thinkingLevel?: PhiThinkingLevel;
 }
 
-export interface TelegramChatChannelConfig {
+export interface TelegramChatRouteConfig {
 	enabled?: boolean;
-	agent: string;
+	id: number | string;
 	token: string;
 }
 
-export interface TelegramChannelConfig {
-	chats: Record<string, TelegramChatChannelConfig>;
+export interface PhiChatRoutesConfig {
+	telegram?: TelegramChatRouteConfig;
 }
 
-export interface TuiChannelConfig {
+export interface PhiChatConfig {
+	enabled?: boolean;
+	workspace: string;
 	agent: string;
-}
-
-export interface PhiChannelsConfig {
-	telegram?: TelegramChannelConfig;
-	tui?: TuiChannelConfig;
+	routes?: PhiChatRoutesConfig;
 }
 
 export interface PhiConfig {
 	agents?: Record<string, PhiAgentConfig>;
-	channels?: PhiChannelsConfig;
+	chats?: Record<string, PhiChatConfig>;
 }
 
 export interface ResolvedTelegramChatServiceConfig {
 	chatId: string;
-	agentId: string;
+	workspace: string;
+	telegramChatId: string;
 	token: string;
 }
 
@@ -57,9 +56,10 @@ export interface ResolvedAgentRuntimeConfig {
 	thinkingLevel: PhiThinkingLevel;
 }
 
-export interface TuiChatOverride {
-	channel: string;
+export interface ResolvedChatRuntimeConfig {
 	chatId: string;
+	workspace: string;
+	agentId: string;
 }
 
 const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
@@ -73,6 +73,44 @@ const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toNonEmptyString(value: unknown, errorMessage: string): string {
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error(errorMessage);
+	}
+	return value;
+}
+
+function toTelegramChatId(value: unknown, errorMessage: string): string {
+	if (typeof value === "number") {
+		return String(value);
+	}
+	if (typeof value === "string" && value.length > 0) {
+		return value;
+	}
+	throw new Error(errorMessage);
+}
+
+function resolveChatRuntimeConfigFromEntry(
+	chatId: string,
+	chatConfig: PhiChatConfig
+): ResolvedChatRuntimeConfig {
+	if (chatConfig.enabled === false) {
+		throw new Error(`Chat is disabled in phi config: ${chatId}`);
+	}
+
+	return {
+		chatId,
+		workspace: toNonEmptyString(
+			chatConfig.workspace,
+			`Invalid chat configuration for ${chatId}: missing workspace`
+		),
+		agentId: toNonEmptyString(
+			chatConfig.agent,
+			`Invalid chat configuration for ${chatId}: missing agent`
+		),
+	};
 }
 
 export function getDefaultPhiConfigFilePath(
@@ -103,101 +141,67 @@ export function loadPhiConfig(configFilePath: string): PhiConfig {
 export function resolveTelegramChatServiceConfigs(
 	phiConfig: PhiConfig
 ): ResolvedTelegramChatServiceConfig[] {
-	const chats = phiConfig.channels?.telegram?.chats;
+	const chats = phiConfig.chats;
 	if (!chats) {
-		throw new Error(
-			"Missing channels.telegram.chats configuration in phi config."
-		);
+		throw new Error("Missing chats configuration in phi config.");
 	}
 
-	const entries = Object.entries(chats)
-		.filter(([, mapping]) => mapping.enabled ?? true)
-		.map(([chatId, mapping]) => {
-			if (!mapping.agent) {
-				throw new Error(
-					`Invalid telegram chat mapping for chat id ${chatId}: missing agent`
-				);
-			}
-			if (!mapping.token) {
-				throw new Error(
-					`Invalid telegram chat mapping for chat id ${chatId}: missing token`
-				);
-			}
+	const entries: ResolvedTelegramChatServiceConfig[] = [];
+	for (const [chatId, chatConfig] of Object.entries(chats)) {
+		if (chatConfig.enabled === false) {
+			continue;
+		}
 
-			return {
-				chatId,
-				agentId: mapping.agent,
-				token: mapping.token,
-			};
+		const telegramRoute = chatConfig.routes?.telegram;
+		if (!telegramRoute || telegramRoute.enabled === false) {
+			continue;
+		}
+
+		const resolvedChat = resolveChatRuntimeConfigFromEntry(
+			chatId,
+			chatConfig
+		);
+		const telegramChatId = toTelegramChatId(
+			telegramRoute.id,
+			`Invalid telegram route for chat ${chatId}: missing id`
+		);
+		const token = toNonEmptyString(
+			telegramRoute.token,
+			`Invalid telegram route for chat ${chatId}: missing token`
+		);
+
+		entries.push({
+			chatId,
+			workspace: resolvedChat.workspace,
+			telegramChatId,
+			token,
 		});
+	}
 
 	if (entries.length === 0) {
-		throw new Error("channels.telegram.chats has no enabled chat.");
+		throw new Error(
+			"No enabled telegram routes found in chats configuration."
+		);
 	}
 
 	return entries;
 }
 
-function resolveTelegramChatAgentId(
+export function resolveChatRuntimeConfig(
 	phiConfig: PhiConfig,
 	chatId: string
-): string {
-	const chats = phiConfig.channels?.telegram?.chats;
+): ResolvedChatRuntimeConfig {
+	const chats = phiConfig.chats;
 	if (!chats) {
-		throw new Error(
-			"Missing channels.telegram.chats configuration in phi config."
-		);
+		throw new Error("Missing chats configuration in phi config.");
 	}
 
 	const chatConfig = chats[chatId];
 	if (!chatConfig) {
-		throw new Error(`Unknown telegram chat mapping for chat id: ${chatId}`);
-	}
-	if (chatConfig.enabled === false) {
-		throw new Error(`Telegram chat is disabled: ${chatId}`);
-	}
-	if (!chatConfig.agent) {
-		throw new Error(
-			`Invalid telegram chat mapping for chat id ${chatId}: missing agent`
-		);
-	}
-	return chatConfig.agent;
-}
-
-function resolveChannelChatAgentId(
-	phiConfig: PhiConfig,
-	override: TuiChatOverride
-): string {
-	if (override.channel.length === 0) {
-		throw new Error("Invalid tui chat override: empty channel");
-	}
-	if (override.chatId.length === 0) {
-		throw new Error("Invalid tui chat override: empty chat id");
-	}
-	if (override.channel === "telegram") {
-		return resolveTelegramChatAgentId(phiConfig, override.chatId);
-	}
-	throw new Error(
-		`Unsupported tui chat override channel: ${override.channel}`
-	);
-}
-
-export function resolveTuiAgentId(
-	phiConfig: PhiConfig,
-	override?: TuiChatOverride
-): string {
-	if (override) {
-		return resolveChannelChatAgentId(phiConfig, override);
+		throw new Error(`Missing chat configuration for chat id: ${chatId}`);
 	}
 
-	const tuiConfig = phiConfig.channels?.tui;
-	if (!tuiConfig) {
-		throw new Error("Missing channels.tui configuration in phi config.");
-	}
-	if (!tuiConfig.agent) {
-		throw new Error("Invalid channels.tui configuration: missing agent");
-	}
-	return tuiConfig.agent;
+	return resolveChatRuntimeConfigFromEntry(chatId, chatConfig);
 }
 
 export function resolveAgentRuntimeConfig(

@@ -10,7 +10,8 @@ import {
 	type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 
-import { getPhiSharedAuthFilePath, getPhiTuiAgentDir } from "@phi/core/paths";
+import { getPhiSharedAuthFilePath } from "@phi/core/paths";
+import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
@@ -23,7 +24,7 @@ export async function createDefaultTuiSession(
 	cwd: string = process.cwd(),
 	userHomeDir: string = homedir()
 ): Promise<AgentSession> {
-	const agentDir = getPhiTuiAgentDir(userHomeDir);
+	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const authStorage = AuthStorage.create(
 		getPhiSharedAuthFilePath(userHomeDir)
 	);

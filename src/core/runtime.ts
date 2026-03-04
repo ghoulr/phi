@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -12,69 +11,29 @@ import {
 } from "@mariozechner/pi-coding-agent";
 
 import {
-	AgentPool,
-	type AgentSessionFactory,
+	ChatSessionPool,
+	type ChatSessionFactory,
 	type DisposableSession,
-} from "@phi/core/agent-pool";
-import { resolveAgentRuntimeConfig, type PhiConfig } from "@phi/core/config";
+} from "@phi/core/chat-pool";
 import {
-	getPhiConfigFilePath,
-	getPhiDir,
-	getPhiSharedAuthFilePath,
-} from "@phi/core/paths";
+	ensureChatSessionStorageDir,
+	ensureChatWorkspaceLayout,
+	resolveChatWorkspaceDirectory,
+} from "@phi/core/chat-workspace";
+import {
+	resolveAgentRuntimeConfig,
+	resolveChatRuntimeConfig,
+	type PhiConfig,
+} from "@phi/core/config";
+import { getPhiSharedAuthFilePath } from "@phi/core/paths";
+import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 
 export {
-	AgentPool,
-	ConversationRuntime,
-	type AgentConversationRuntime,
-	type AgentSessionFactory,
+	ChatSessionPool,
+	type ChatSessionFactory,
+	type ChatSessionRuntime,
 	type DisposableSession,
-	type SessionFactory,
-} from "@phi/core/agent-pool";
-
-const AGENT_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
-
-function encodeConversationKey(conversationKey: string): string {
-	if (conversationKey.length === 0) {
-		throw new Error("Conversation key must not be empty.");
-	}
-	return Buffer.from(conversationKey, "utf-8").toString("base64url");
-}
-
-function getConversationSessionsDir(
-	sessionsDir: string,
-	conversationKey: string
-): string {
-	return join(sessionsDir, encodeConversationKey(conversationKey));
-}
-
-export interface AgentWorkspace {
-	agentId: string;
-	phiDir: string;
-	phiConfigFilePath: string;
-	agentRootDir: string;
-	piAgentDir: string;
-	sessionsDir: string;
-	sharedAuthFilePath: string;
-}
-
-export interface AgentResourceProvider {
-	resolveAgentWorkspace(
-		agentId: string,
-		cwd?: string,
-		userHomeDir?: string
-	): AgentWorkspace;
-}
-
-export class PhiRuntime<
-	TSession extends DisposableSession,
-> extends AgentPool<TSession> {}
-
-function assertValidAgentId(agentId: string): void {
-	if (!AGENT_ID_PATTERN.test(agentId)) {
-		throw new Error(`Invalid agent id: ${agentId}`);
-	}
-}
+} from "@phi/core/chat-pool";
 
 function getLegacyAgentsSkillsDir(userHomeDir: string = homedir()): string {
 	return join(userHomeDir, ".agents", "skills");
@@ -98,56 +57,14 @@ function isSkillFromLegacyAgentsDir(
 	);
 }
 
-export class FileSystemResourceProvider implements AgentResourceProvider {
-	public resolveAgentWorkspace(
-		agentId: string,
-		_cwd: string = process.cwd(),
-		userHomeDir: string = homedir()
-	): AgentWorkspace {
-		assertValidAgentId(agentId);
-
-		const phiDir = getPhiDir(userHomeDir);
-		const phiConfigFilePath = getPhiConfigFilePath(userHomeDir);
-		if (!existsSync(phiConfigFilePath)) {
-			throw new Error(`Missing phi config file: ${phiConfigFilePath}`);
-		}
-
-		const agentRootDir = join(phiDir, "agents", agentId);
-		if (!existsSync(agentRootDir)) {
-			throw new Error(`Unknown agent workspace: ${agentRootDir}`);
-		}
-
-		const piAgentDir = join(agentRootDir, "pi");
-		if (!existsSync(piAgentDir)) {
-			throw new Error(`Missing pi workspace directory: ${piAgentDir}`);
-		}
-
-		return {
-			agentId,
-			phiDir,
-			phiConfigFilePath,
-			agentRootDir,
-			piAgentDir,
-			sessionsDir: join(agentRootDir, "sessions"),
-			sharedAuthFilePath: getPhiSharedAuthFilePath(userHomeDir),
-		};
-	}
-}
-
 async function createPhiResourceLoader(
-	agentId: string,
-	resourceProvider: AgentResourceProvider,
-	cwd: string = process.cwd(),
+	cwd: string,
+	agentDir: string,
 	userHomeDir: string = homedir()
 ): Promise<DefaultResourceLoader> {
-	const workspace = resourceProvider.resolveAgentWorkspace(
-		agentId,
-		cwd,
-		userHomeDir
-	);
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
-		agentDir: workspace.piAgentDir,
+		agentDir,
 		skillsOverride: (base) => ({
 			skills: base.skills.filter(
 				(skill) =>
@@ -162,64 +79,68 @@ async function createPhiResourceLoader(
 }
 
 async function createDefaultAgentSession(
-	agentId: string,
-	conversationKey: string,
+	chatId: string,
 	phiConfig: PhiConfig
 ): Promise<AgentSession> {
-	const cwd = process.cwd();
 	const userHomeDir = homedir();
-	const resourceProvider = new FileSystemResourceProvider();
-	const workspace = resourceProvider.resolveAgentWorkspace(
-		agentId,
-		cwd,
+	const chatConfig = resolveChatRuntimeConfig(phiConfig, chatId);
+	const chatWorkspaceDir = resolveChatWorkspaceDirectory(
+		chatConfig.workspace,
 		userHomeDir
 	);
+	const chatWorkspaceLayout = ensureChatWorkspaceLayout(chatWorkspaceDir);
+	const chatSessionStorageDir = ensureChatSessionStorageDir(
+		chatWorkspaceLayout.sessionsDir,
+		chatId
+	);
 
-	const agentConfig = resolveAgentRuntimeConfig(phiConfig, agentId);
-	const authStorage = AuthStorage.create(workspace.sharedAuthFilePath);
+	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
+	const agentConfig = resolveAgentRuntimeConfig(
+		phiConfig,
+		chatConfig.agentId
+	);
+	const authStorage = AuthStorage.create(
+		getPhiSharedAuthFilePath(userHomeDir)
+	);
 	const modelRegistry = new ModelRegistry(
 		authStorage,
-		join(workspace.piAgentDir, "models.json")
+		join(agentDir, "models.json")
 	);
 	const model = modelRegistry.find(agentConfig.provider, agentConfig.model);
 	if (!model) {
 		throw new Error(
-			`Unknown model for agent ${agentId}: ${agentConfig.provider}/${agentConfig.model}`
+			`Unknown model for agent ${chatConfig.agentId}: ${agentConfig.provider}/${agentConfig.model}`
 		);
 	}
 
-	const conversationSessionsDir = getConversationSessionsDir(
-		workspace.sessionsDir,
-		conversationKey
-	);
-
 	const { session } = await createAgentSession({
-		cwd,
-		agentDir: workspace.piAgentDir,
+		cwd: chatWorkspaceDir,
+		agentDir,
 		authStorage,
 		modelRegistry,
 		model,
 		thinkingLevel: agentConfig.thinkingLevel,
 		sessionManager: SessionManager.continueRecent(
-			cwd,
-			conversationSessionsDir
+			chatWorkspaceDir,
+			chatSessionStorageDir
 		),
 		resourceLoader: await createPhiResourceLoader(
-			agentId,
-			resourceProvider,
-			cwd,
+			chatWorkspaceDir,
+			agentDir,
 			userHomeDir
 		),
 	});
 	return session;
 }
 
+export class PhiRuntime<
+	TSession extends DisposableSession,
+> extends ChatSessionPool<TSession> {}
+
 export function createPhiRuntime(
 	phiConfig: PhiConfig,
-	sessionFactory: AgentSessionFactory<AgentSession> = (
-		agentId: string,
-		conversationKey: string
-	) => createDefaultAgentSession(agentId, conversationKey, phiConfig)
+	sessionFactory: ChatSessionFactory<AgentSession> = (chatId: string) =>
+		createDefaultAgentSession(chatId, phiConfig)
 ): PhiRuntime<AgentSession> {
 	return new PhiRuntime<AgentSession>(sessionFactory);
 }

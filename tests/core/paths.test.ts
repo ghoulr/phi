@@ -3,8 +3,8 @@ import { describe, expect, it } from "bun:test";
 import {
 	getPhiConfigFilePath,
 	getPhiDir,
+	getPhiPiAgentDir,
 	getPhiSharedAuthFilePath,
-	getPhiTuiAgentDir,
 } from "@phi/core/paths";
 
 describe("phi paths", () => {
@@ -18,7 +18,7 @@ describe("phi paths", () => {
 		expect(getPhiSharedAuthFilePath(homeDir)).toBe(
 			"/tmp/custom-home/.phi/auth/auth.json"
 		);
-		expect(getPhiTuiAgentDir(homeDir)).toBe("/tmp/custom-home/.phi/pi");
+		expect(getPhiPiAgentDir(homeDir)).toBe("/tmp/custom-home/.phi/pi");
 	});
 
 	it("normalizes trailing slash in home directory", () => {

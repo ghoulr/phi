@@ -15,6 +15,6 @@ export function getPhiSharedAuthFilePath(
 	return join(getPhiDir(userHomeDir), "auth", "auth.json");
 }
 
-export function getPhiTuiAgentDir(userHomeDir: string = homedir()): string {
+export function getPhiPiAgentDir(userHomeDir: string = homedir()): string {
 	return join(getPhiDir(userHomeDir), "pi");
 }

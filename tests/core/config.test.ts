@@ -7,8 +7,8 @@ import { describe, expect, it } from "bun:test";
 import {
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
+	resolveChatRuntimeConfig,
 	resolveTelegramChatServiceConfigs,
-	resolveTuiAgentId,
 } from "@phi/core/config";
 
 describe("phi config", () => {
@@ -18,7 +18,7 @@ describe("phi config", () => {
 		).toThrow("Missing phi config file");
 	});
 
-	it("resolves telegram chat service config from phi config", () => {
+	it("resolves telegram routes from chats", () => {
 		const directory = mkdtempSync(join(tmpdir(), "phi-config-"));
 		const configPath = join(directory, "phi.yaml");
 
@@ -30,13 +30,13 @@ describe("phi config", () => {
 					"  main:",
 					"    provider: opencode",
 					"    model: big-pickle",
-					"    thinkingLevel: medium",
-					"channels:",
-					"  telegram:",
-					"    chats:",
-					'      "-10001":',
-					"        enabled: true",
-					"        agent: main",
+					"chats:",
+					"  user-alice:",
+					"    workspace: ~/phi/workspaces/alice",
+					"    agent: main",
+					"    routes:",
+					"      telegram:",
+					"        id: -10001",
 					"        token: bot-token",
 				].join("\n"),
 				"utf-8"
@@ -45,8 +45,9 @@ describe("phi config", () => {
 			const config = loadPhiConfig(configPath);
 			expect(resolveTelegramChatServiceConfigs(config)).toEqual([
 				{
-					chatId: "-10001",
-					agentId: "main",
+					chatId: "user-alice",
+					workspace: "~/phi/workspaces/alice",
+					telegramChatId: "-10001",
 					token: "bot-token",
 				},
 			]);
@@ -55,20 +56,31 @@ describe("phi config", () => {
 		}
 	});
 
-	it("skips disabled telegram chat config", () => {
+	it("skips disabled chat and chat without telegram route", () => {
 		expect(
 			resolveTelegramChatServiceConfigs({
-				channels: {
-					telegram: {
-						chats: {
-							"1": {
-								enabled: false,
-								agent: "main",
+				chats: {
+					"user-disabled": {
+						enabled: false,
+						workspace: "~/disabled",
+						agent: "main",
+						routes: {
+							telegram: {
+								id: "1001",
 								token: "token",
 							},
-							"2": {
-								enabled: true,
-								agent: "support",
+						},
+					},
+					"user-no-telegram": {
+						workspace: "~/no-telegram",
+						agent: "main",
+					},
+					"user-active": {
+						workspace: "~/active",
+						agent: "support",
+						routes: {
+							telegram: {
+								id: "1002",
 								token: "token",
 							},
 						},
@@ -77,205 +89,133 @@ describe("phi config", () => {
 			})
 		).toEqual([
 			{
-				chatId: "2",
-				agentId: "support",
+				chatId: "user-active",
+				workspace: "~/active",
+				telegramChatId: "1002",
 				token: "token",
 			},
 		]);
 	});
 
-	it("fails when telegram chats mapping is missing", () => {
-		expect(() =>
-			resolveTelegramChatServiceConfigs({ channels: {} })
-		).toThrow(
-			"Missing channels.telegram.chats configuration in phi config."
+	it("fails when chats mapping is missing", () => {
+		expect(() => resolveTelegramChatServiceConfigs({})).toThrow(
+			"Missing chats configuration in phi config."
 		);
 	});
 
-	it("fails when token is missing", () => {
-		const directory = mkdtempSync(join(tmpdir(), "phi-config-"));
-		const configPath = join(directory, "phi.yaml");
-
-		try {
-			writeFileSync(
-				configPath,
-				[
-					"channels:",
-					"  telegram:",
-					"    chats:",
-					'      "1001":',
-					"        agent: main",
-				].join("\n"),
-				"utf-8"
-			);
-
-			const config = loadPhiConfig(configPath);
-			expect(() => resolveTelegramChatServiceConfigs(config)).toThrow(
-				"Invalid telegram chat mapping for chat id 1001: missing token"
-			);
-		} finally {
-			rmSync(directory, { recursive: true, force: true });
-		}
-	});
-
-	it("resolves tui agent id from phi config", () => {
-		expect(
-			resolveTuiAgentId({
-				channels: {
-					tui: {
-						agent: "support",
+	it("fails when telegram route token is missing", () => {
+		expect(() =>
+			resolveTelegramChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						workspace: "~/alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								id: "1001",
+								token: "",
+							},
+						},
 					},
 				},
 			})
-		).toBe("support");
+		).toThrow("Invalid telegram route for chat user-alice: missing token");
 	});
 
-	it("resolves tui agent id from telegram chat when override is provided", () => {
-		expect(
-			resolveTuiAgentId(
-				{
-					channels: {
-						telegram: {
-							chats: {
-								"-10001": {
-									agent: "support",
-									token: "bot-token",
-								},
+	it("fails when chat workspace is missing", () => {
+		expect(() =>
+			resolveTelegramChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						workspace: "",
+						agent: "main",
+						routes: {
+							telegram: {
+								id: "1001",
+								token: "token",
 							},
 						},
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "telegram", chatId: "-10001" }
-			)
-		).toBe("support");
-	});
-
-	it("fails when tui channel config is missing", () => {
-		expect(() => resolveTuiAgentId({ channels: {} })).toThrow(
-			"Missing channels.tui configuration in phi config."
-		);
-	});
-
-	it("fails when telegram chats config is missing for chat override", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "telegram", chatId: "-10001" }
-			)
-		).toThrow(
-			"Missing channels.telegram.chats configuration in phi config."
-		);
-	});
-
-	it("fails when chat override channel is empty", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "", chatId: "-10001" }
-			)
-		).toThrow("Invalid tui chat override: empty channel");
-	});
-
-	it("fails when chat override is empty", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						telegram: {
-							chats: {},
-						},
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "telegram", chatId: "" }
-			)
-		).toThrow("Invalid tui chat override: empty chat id");
-	});
-
-	it("fails when chat override channel is unsupported", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "discord", chatId: "1" }
-			)
-		).toThrow("Unsupported tui chat override channel: discord");
-	});
-
-	it("fails when chat override is unknown", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						telegram: {
-							chats: {},
-						},
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "telegram", chatId: "-10001" }
-			)
-		).toThrow("Unknown telegram chat mapping for chat id: -10001");
-	});
-
-	it("fails when chat override is disabled", () => {
-		expect(() =>
-			resolveTuiAgentId(
-				{
-					channels: {
-						telegram: {
-							chats: {
-								"-10001": {
-									enabled: false,
-									agent: "support",
-									token: "bot-token",
-								},
-							},
-						},
-						tui: {
-							agent: "main",
-						},
-					},
-				},
-				{ channel: "telegram", chatId: "-10001" }
-			)
-		).toThrow("Telegram chat is disabled: -10001");
-	});
-
-	it("fails when tui channel agent is missing", () => {
-		expect(() =>
-			resolveTuiAgentId({
-				channels: {
-					tui: {
-						agent: "",
 					},
 				},
 			})
-		).toThrow("Invalid channels.tui configuration: missing agent");
+		).toThrow(
+			"Invalid chat configuration for user-alice: missing workspace"
+		);
+	});
+
+	it("fails when there is no enabled telegram route", () => {
+		expect(() =>
+			resolveTelegramChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						enabled: false,
+						workspace: "~/alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								id: "1001",
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toThrow("No enabled telegram routes found in chats configuration.");
+	});
+
+	it("resolves chat runtime config from phi config", () => {
+		expect(
+			resolveChatRuntimeConfig(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "~/phi/workspaces/alice",
+							agent: "main",
+						},
+					},
+				},
+				"user-alice"
+			)
+		).toEqual({
+			chatId: "user-alice",
+			workspace: "~/phi/workspaces/alice",
+			agentId: "main",
+		});
+	});
+
+	it("fails when chat runtime config is disabled", () => {
+		expect(() =>
+			resolveChatRuntimeConfig(
+				{
+					chats: {
+						"user-alice": {
+							enabled: false,
+							workspace: "~/phi/workspaces/alice",
+							agent: "main",
+						},
+					},
+				},
+				"user-alice"
+			)
+		).toThrow("Chat is disabled in phi config: user-alice");
+	});
+
+	it("fails when chat runtime workspace is missing", () => {
+		expect(() =>
+			resolveChatRuntimeConfig(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "",
+							agent: "main",
+						},
+					},
+				},
+				"user-alice"
+			)
+		).toThrow(
+			"Invalid chat configuration for user-alice: missing workspace"
+		);
 	});
 
 	it("resolves agent runtime config from phi config", () => {
