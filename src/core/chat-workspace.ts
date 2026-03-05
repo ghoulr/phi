@@ -6,6 +6,7 @@ const DOT_PHI_DIR = ".phi";
 const SESSIONS_DIR = "sessions";
 const MEMORY_DIR = "memory";
 const LOGS_DIR = "logs";
+const SKILLS_DIR = "skills";
 const LOGS_FILE_NAME = "logs.jsonl";
 const MEMORY_FILE_NAME = "MEMORY.md";
 const DEFAULT_MEMORY_FILE_CONTENT = "# MEMORY\n";
@@ -16,6 +17,7 @@ export interface ChatWorkspaceLayout {
 	sessionsDir: string;
 	memoryDir: string;
 	logsDir: string;
+	skillsDir: string;
 	memoryFilePath: string;
 }
 
@@ -55,11 +57,13 @@ export function ensureChatWorkspaceLayout(
 	const sessionsDir = join(phiDir, SESSIONS_DIR);
 	const memoryDir = join(phiDir, MEMORY_DIR);
 	const logsDir = join(phiDir, LOGS_DIR);
+	const skillsDir = join(phiDir, SKILLS_DIR);
 	const memoryFilePath = join(memoryDir, MEMORY_FILE_NAME);
 
 	mkdirSync(sessionsDir, { recursive: true });
 	mkdirSync(memoryDir, { recursive: true });
 	mkdirSync(logsDir, { recursive: true });
+	mkdirSync(skillsDir, { recursive: true });
 
 	if (!existsSync(memoryFilePath)) {
 		writeFileSync(memoryFilePath, DEFAULT_MEMORY_FILE_CONTENT, "utf-8");
@@ -71,6 +75,7 @@ export function ensureChatWorkspaceLayout(
 		sessionsDir,
 		memoryDir,
 		logsDir,
+		skillsDir,
 		memoryFilePath,
 	};
 }

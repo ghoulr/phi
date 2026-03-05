@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
 	AuthStorage,
 	createAgentSession,
+	DefaultResourceLoader,
 	InteractiveMode,
 	ModelRegistry,
 	SessionManager,
@@ -12,6 +13,7 @@ import {
 
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
+import { resolvePhiSkillPaths } from "@phi/core/skills";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
@@ -32,6 +34,17 @@ export async function createDefaultTuiSession(
 		authStorage,
 		join(agentDir, "models.json")
 	);
+	const resourceLoader = new DefaultResourceLoader({
+		cwd,
+		agentDir,
+		noSkills: true,
+		additionalSkillPaths: resolvePhiSkillPaths({
+			workspaceDir: cwd,
+			userHomeDir,
+		}),
+	});
+	await resourceLoader.reload();
+
 	const { session } = await createAgentSession({
 		cwd,
 		agentDir,
@@ -41,6 +54,7 @@ export async function createDefaultTuiSession(
 			cwd,
 			getTuiSessionsDir(agentDir)
 		),
+		resourceLoader,
 	});
 	return session;
 }

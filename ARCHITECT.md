@@ -85,7 +85,8 @@ Config structure:
 ```
 ~/.phi/
 ├─ phi.yaml               # Master config (see phi.example.yaml)
-├─ pi/                    # TUI pi configuration (skills, prompts, etc.)
+├─ pi/                    # TUI pi configuration
+│  └─ skills/             # Global skills (shared across chats + TUI)
 └─ auth/
    └─ auth.json
 ```
@@ -95,6 +96,7 @@ Config structure:
 <chat-workspace>/
 └─ .phi/
    ├─ sessions/            # pi sessions
+   ├─ skills/              # Chat-scoped skills
    ├─ memory/
    │  ├─ MEMORY.md
    │  └─ YYYY-MM-DD.md

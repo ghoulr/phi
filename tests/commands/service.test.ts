@@ -14,9 +14,9 @@ import type { ChatSessionRuntime } from "@phi/core/runtime";
 
 const fakeRuntime: ChatSessionRuntime<AgentSession> = {
 	async getOrCreateSession(): Promise<AgentSession> {
-		throw new Error(
-			"Session should not be created in service command unit tests."
-		);
+		return {
+			systemPrompt: "test-system-prompt",
+		} as unknown as AgentSession;
 	},
 	disposeSession(): boolean {
 		return false;

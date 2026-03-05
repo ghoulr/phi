@@ -1,10 +1,15 @@
 # phi
 
-Phi is a multi-user, multi-agent conversation system built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev).
+Phi is a multi-user, multi-agent conversation system built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev), inspired by [openclaw](https://github.com/openclaw/openclaw).
 
 ## Architecture
 
 See [ARCHITECT.md](./ARCHITECT.md) for the full design.
+
+## Concepts
+
+- [System Prompt](./docs/concepts/system-prompt.md)
+- [Skills](./docs/concepts/skills.md)
 
 ```
                     ┌─────────┐
@@ -35,7 +40,8 @@ cp phi.example.yaml ~/.phi/phi.yaml
 ```text
 ~/.phi/
 ├─ phi.yaml               # Master configuration
-├─ pi/                    # TUI pi configuration (skills, prompts, etc.)
+├─ pi/                    # TUI pi configuration
+│  └─ skills/             # Global skills (shared across chats + TUI)
 └─ auth/
    └─ auth.json
 ```
@@ -46,6 +52,7 @@ Chat workspaces are configured in `phi.yaml`:
 <chat-workspace>/
 └─ .phi/
    ├─ sessions/            # pi sessions
+   ├─ skills/              # Chat-scoped skills
    ├─ memory/
    │  ├─ MEMORY.md
    │  └─ YYYY-MM-DD.md

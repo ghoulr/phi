@@ -77,12 +77,28 @@ async function stopAllBots(bots: RunningTelegramPollingBot[]): Promise<void> {
 	);
 }
 
+async function printSystemPromptDebugOutput(
+	runtime: ChatSessionRuntime<AgentSession>,
+	chatConfigs: ResolvedTelegramChatServiceConfig[]
+): Promise<void> {
+	const uniqueChatIds = Array.from(
+		new Set(chatConfigs.map((chatConfig) => chatConfig.chatId))
+	);
+	for (const chatId of uniqueChatIds) {
+		const session = await runtime.getOrCreateSession(chatId);
+		console.debug(
+			`[phi][debug] generated system prompt for chat ${chatId}:\n${session.systemPrompt}`
+		);
+	}
+}
+
 export async function runServiceCommand(
 	runtime: ChatSessionRuntime<AgentSession>,
 	phiConfig: PhiConfig,
 	dependencies: ServiceCommandDependencies = defaultServiceCommandDependencies
 ): Promise<void> {
 	const telegramChats = dependencies.resolveTelegramChats(phiConfig);
+	await printSystemPromptDebugOutput(runtime, telegramChats);
 	const telegramBotConfigs = buildTelegramBotConfigs(telegramChats);
 
 	const runningBots: RunningTelegramPollingBot[] = [];

@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join } from "node:path";
 
 import {
 	AuthStorage,
@@ -27,6 +27,8 @@ import {
 } from "@phi/core/config";
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
+import { resolvePhiSkillPaths } from "@phi/core/skills";
+import { buildPhiSystemPrompt } from "./system-prompt";
 
 export {
 	ChatSessionPool,
@@ -35,42 +37,21 @@ export {
 	type DisposableSession,
 } from "@phi/core/chat-pool";
 
-function getLegacyAgentsSkillsDir(userHomeDir: string = homedir()): string {
-	return join(userHomeDir, ".agents", "skills");
-}
+const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
 
-function isPathInsideDirectory(path: string, directory: string): boolean {
-	const relativePath = relative(resolve(directory), resolve(path));
-	return (
-		relativePath === "" ||
-		(!relativePath.startsWith("..") && !isAbsolute(relativePath))
-	);
-}
-
-function isSkillFromLegacyAgentsDir(
-	skillFilePath: string,
-	userHomeDir: string = homedir()
-): boolean {
-	return isPathInsideDirectory(
-		skillFilePath,
-		getLegacyAgentsSkillsDir(userHomeDir)
-	);
-}
-
-async function createPhiResourceLoader(
-	cwd: string,
-	agentDir: string,
-	userHomeDir: string = homedir()
-): Promise<DefaultResourceLoader> {
+async function createPhiResourceLoader(params: {
+	cwd: string;
+	agentDir: string;
+	userHomeDir?: string;
+}): Promise<DefaultResourceLoader> {
+	const userHomeDir = params.userHomeDir ?? homedir();
 	const resourceLoader = new DefaultResourceLoader({
-		cwd,
-		agentDir,
-		skillsOverride: (base) => ({
-			skills: base.skills.filter(
-				(skill) =>
-					!isSkillFromLegacyAgentsDir(skill.filePath, userHomeDir)
-			),
-			diagnostics: base.diagnostics,
+		cwd: params.cwd,
+		agentDir: params.agentDir,
+		noSkills: true,
+		additionalSkillPaths: resolvePhiSkillPaths({
+			workspaceDir: params.cwd,
+			userHomeDir,
 		}),
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
@@ -113,6 +94,12 @@ async function createDefaultAgentSession(
 		);
 	}
 
+	const resourceLoader = await createPhiResourceLoader({
+		cwd: chatWorkspaceDir,
+		agentDir,
+		userHomeDir,
+	});
+
 	const { session } = await createAgentSession({
 		cwd: chatWorkspaceDir,
 		agentDir,
@@ -124,12 +111,18 @@ async function createDefaultAgentSession(
 			chatWorkspaceDir,
 			chatSessionStorageDir
 		),
-		resourceLoader: await createPhiResourceLoader(
-			chatWorkspaceDir,
-			agentDir,
-			userHomeDir
-		),
+		resourceLoader,
 	});
+
+	session.agent.setSystemPrompt(
+		buildPhiSystemPrompt({
+			assistantName: "Phi",
+			workspacePath: chatWorkspaceDir,
+			skills: resourceLoader.getSkills().skills,
+			memoryFilePath: chatWorkspaceLayout.memoryFilePath,
+			toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+		})
+	);
 	return session;
 }
 
