@@ -12,7 +12,7 @@ import {
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 
-import { applyPhiSystemPromptOverride } from "./system-prompt-override";
+import { applyPhiSystemPromptOverride } from "@phi/extensions/system-prompt";
 
 export interface PhiTransientTurnSnapshot {
 	cwd: string;

@@ -1,8 +1,12 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "bun:test";
 
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
-import { runTuiCommand } from "@phi/commands/tui";
+import { ensureTuiMemoryFile, runTuiCommand } from "@phi/commands/tui";
 
 type FakeSession = {
 	disposeCalls: number;
@@ -18,6 +22,24 @@ function createFakeAgentSession(): AgentSession {
 	};
 	return session as unknown as AgentSession;
 }
+
+describe("ensureTuiMemoryFile", () => {
+	it("creates tui memory file under the global tui state root", () => {
+		const homeDir = mkdtempSync(join(tmpdir(), "phi-tui-home-"));
+
+		try {
+			const memoryFilePath = ensureTuiMemoryFile(homeDir);
+
+			expect(memoryFilePath).toBe(
+				join(homeDir, ".phi", "pi", "memory", "MEMORY.md")
+			);
+			expect(existsSync(memoryFilePath)).toBe(true);
+			expect(readFileSync(memoryFilePath, "utf-8")).toBe("# MEMORY\n");
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("runTuiCommand", () => {
 	it("passes created session into mode runner", async () => {

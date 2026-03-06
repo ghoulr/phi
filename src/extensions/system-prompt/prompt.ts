@@ -5,6 +5,8 @@ import {
 	type Skill,
 } from "@mariozechner/pi-coding-agent";
 
+import { buildPhiMemoryPromptPaths } from "@phi/core/memory-paths";
+
 export interface BuildPhiSystemPromptParams {
 	assistantName: string;
 	workspacePath: string;
@@ -141,18 +143,26 @@ function appendSection(lines: string[], title: string, body: string): void {
 	lines.push(title, normalized, "");
 }
 
-function buildMemorySection(memoryText: string): string {
+function buildMemorySection(params: {
+	workspacePath: string;
+	memoryFilePath: string;
+	memoryText: string;
+}): string {
+	const memoryPaths = buildPhiMemoryPromptPaths({
+		workspacePath: params.workspacePath,
+		memoryFilePath: params.memoryFilePath,
+	});
 	const lines = [
 		"Persist important long-lived context in memory files.",
 		"",
-		'- Use `.phi/memory/MEMORY.md` for durable facts and explicit "remember this" requests, when user asks to remember anything, add to this file, keep it small and concise, rewrite it if necessary.',
-		"- Use `YYYY-MM-DD.md` in `.phi/memory/` for raw daily notes and working context.",
+		`- Use \`${memoryPaths.memoryFilePath}\` for durable facts and explicit "remember this" requests, when user asks to remember anything, add to this file, keep it small and concise, rewrite it if necessary.`,
+		`- Use \`${memoryPaths.dailyMemoryFilePath}\` for raw daily notes and working context.`,
 		"- Daily notes are not auto-injected; grep and read them on demand when needed.",
 	];
-	if (!memoryText) {
+	if (!params.memoryText) {
 		return lines.join("\n");
 	}
-	lines.push("", "Current MEMORY.md:", "", memoryText);
+	lines.push("", "Current MEMORY.md:", "", params.memoryText);
 	return lines.join("\n");
 }
 
@@ -176,7 +186,15 @@ export function buildPhiSystemPrompt(
 	];
 
 	appendSection(lines, "## Skills", skillsText);
-	appendSection(lines, "## Memory", buildMemorySection(memoryText));
+	appendSection(
+		lines,
+		"## Memory",
+		buildMemorySection({
+			workspacePath: params.workspacePath,
+			memoryFilePath: params.memoryFilePath,
+			memoryText,
+		})
+	);
 	appendSection(lines, "## Events & Replies", eventText);
 
 	lines.push("## Tools", toolsText, "", "Tool guidance:");

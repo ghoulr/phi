@@ -13,12 +13,22 @@ This document describes how phi discovers and loads skills for runtime and TUI s
 
 ## Skill Locations
 
-phi uses two filesystem scopes:
+phi has two different loading models.
+
+### Service chat
+
+Service chat uses phi skill scopes:
 
 - Global: `~/.phi/pi/skills`
 - Chat-scoped: `<chat-workspace>/.phi/skills`
 
 `<chat-workspace>` comes from `chats.<chatId>.workspace` in `~/.phi/phi.yaml`.
+
+### TUI chat
+
+TUI uses pi-style resource loading rooted at `~/.phi/pi`.
+
+It does not use `<cwd>/.phi/skills` as a phi-owned skill root.
 
 ## Workspace Preparation
 
@@ -31,7 +41,9 @@ For chat runtime sessions, `ensureChatWorkspaceLayout(...)` creates:
 
 ## Loader Configuration
 
-Both runtime and TUI use `DefaultResourceLoader` with:
+### Service chat
+
+Runtime uses `DefaultResourceLoader` with:
 
 - `noSkills: true`
 - `additionalSkillPaths: resolvePhiSkillPaths(...)`
@@ -43,9 +55,15 @@ Both runtime and TUI use `DefaultResourceLoader` with:
 
 Only existing directories are included.
 
+### TUI chat
+
+TUI uses `DefaultResourceLoader` in pi-style mode.
+
+phi still applies phi-owned behavior on top, but skill discovery itself follows pi loading.
+
 ## Collision Behavior
 
-phi skill loading passes `includeDefaults: false` and uses ordered `skillPaths`.
+For service chat skill loading, phi uses ordered `skillPaths`.
 When multiple skills share the same name, the first loaded skill is kept.
 With phi path order, chat-scoped skills take precedence over global skills.
 
@@ -57,11 +75,6 @@ With phi path order, chat-scoped skills take precedence over global skills.
 ## Configuration Surface
 
 - Add/edit global skills under `~/.phi/pi/skills`.
-- Add/edit chat-scoped skills under `<chat-workspace>/.phi/skills`.
-- Change loading order or locations in `src/core/skills.ts`.
+- Add/edit chat-scoped skills under `<chat-workspace>/.phi/skills` for service chats.
+- Change service chat loading order or locations in `src/core/skills.ts`.
 - Change loader behavior in `src/core/runtime.ts` and `src/commands/tui.ts`.
-
-## Notes
-
-- Current phi skill loading is filesystem-based.
-- Current runtime code does not read a skills list from `phi.yaml` for loader path selection.

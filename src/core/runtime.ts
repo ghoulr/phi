@@ -27,9 +27,8 @@ import {
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 import { resolvePhiSkillPaths } from "@phi/core/skills";
-import { createPhiMemoryMaintenanceExtension } from "./memory-maintenance";
-import { applyPhiSystemPromptOverride } from "./system-prompt-override";
-import { buildPhiSystemPrompt } from "./system-prompt";
+import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
+import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 
 export {
 	ChatSessionPool,
@@ -54,7 +53,11 @@ async function createPhiResourceLoader(params: {
 			workspaceDir: params.cwd,
 			userHomeDir,
 		}),
-		extensionFactories: [createPhiMemoryMaintenanceExtension()],
+		extensionFactories: [
+			createPhiMemoryMaintenanceExtension({
+				memoryFilePath: ".phi/memory/MEMORY.md",
+			}),
+		],
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();
@@ -112,16 +115,14 @@ async function createDefaultAgentSession(
 		resourceLoader,
 	});
 
-	applyPhiSystemPromptOverride(
+	installPhiSystemPrompt({
 		session,
-		buildPhiSystemPrompt({
-			assistantName: "Phi",
-			workspacePath: chatWorkspaceDir,
-			skills: resourceLoader.getSkills().skills,
-			memoryFilePath: chatWorkspaceLayout.memoryFilePath,
-			toolNames: DEFAULT_PROMPT_TOOL_NAMES,
-		})
-	);
+		assistantName: "Phi",
+		workspacePath: chatWorkspaceDir,
+		skills: resourceLoader.getSkills().skills,
+		memoryFilePath: chatWorkspaceLayout.memoryFilePath,
+		toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+	});
 	return session;
 }
 

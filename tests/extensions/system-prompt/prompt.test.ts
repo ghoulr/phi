@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "bun:test";
 
-import { buildPhiSystemPrompt } from "@phi/core/system-prompt";
+import { buildPhiSystemPrompt } from "@phi/extensions/system-prompt";
 
 function createMemoryFile(content: string): { dir: string; filePath: string } {
 	const dir = mkdtempSync(join(tmpdir(), "phi-system-prompt-"));
@@ -100,6 +100,26 @@ describe("buildPhiSystemPrompt", () => {
 
 			expect(prompt.includes("Current MEMORY.md")).toBe(true);
 			expect(prompt.includes("remember this")).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("uses absolute memory path text when memory is outside workspace", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["read"],
+				eventText: "",
+			});
+
+			expect(prompt.includes(filePath)).toBe(true);
+			expect(prompt.includes(join(dir, "YYYY-MM-DD.md"))).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

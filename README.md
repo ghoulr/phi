@@ -8,6 +8,7 @@ See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 
 ## Concepts
 
+- [Chat](./docs/concepts/chat.md)
 - [System Prompt](./docs/concepts/system-prompt.md)
 - [Skills](./docs/concepts/skills.md)
 - [Memory](./docs/concepts/memory.md)

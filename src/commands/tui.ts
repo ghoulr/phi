@@ -1,5 +1,6 @@
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
 	AuthStorage,
@@ -11,13 +12,13 @@ import {
 	type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 
-import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
-import { getPhiSharedAuthFilePath } from "@phi/core/paths";
+import {
+	getPhiPiMemoryFilePath,
+	getPhiSharedAuthFilePath,
+} from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
-import { resolvePhiSkillPaths } from "@phi/core/skills";
-import { createPhiMemoryMaintenanceExtension } from "@phi/core/memory-maintenance";
-import { applyPhiSystemPromptOverride } from "@phi/core/system-prompt-override";
-import { buildPhiSystemPrompt } from "@phi/core/system-prompt";
+import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
+import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
@@ -28,11 +29,20 @@ function getTuiSessionsDir(agentDir: string): string {
 	return join(agentDir, "sessions");
 }
 
+export function ensureTuiMemoryFile(userHomeDir: string = homedir()): string {
+	const memoryFilePath = getPhiPiMemoryFilePath(userHomeDir);
+	mkdirSync(dirname(memoryFilePath), { recursive: true });
+	if (!existsSync(memoryFilePath)) {
+		writeFileSync(memoryFilePath, "# MEMORY\n", "utf-8");
+	}
+	return memoryFilePath;
+}
+
 export async function createDefaultTuiSession(
 	cwd: string = process.cwd(),
 	userHomeDir: string = homedir()
 ): Promise<AgentSession> {
-	const workspaceLayout = ensureChatWorkspaceLayout(cwd);
+	const memoryFilePath = ensureTuiMemoryFile(userHomeDir);
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const authStorage = AuthStorage.create(
 		getPhiSharedAuthFilePath(userHomeDir)
@@ -44,13 +54,11 @@ export async function createDefaultTuiSession(
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
-		noSkills: true,
-		additionalSkillPaths: resolvePhiSkillPaths({
-			workspaceDir: cwd,
-			userHomeDir,
-		}),
-		extensionFactories: [createPhiMemoryMaintenanceExtension()],
-		agentsFilesOverride: () => ({ agentsFiles: [] }),
+		extensionFactories: [
+			createPhiMemoryMaintenanceExtension({
+				memoryFilePath,
+			}),
+		],
 	});
 	await resourceLoader.reload();
 
@@ -65,16 +73,14 @@ export async function createDefaultTuiSession(
 		),
 		resourceLoader,
 	});
-	applyPhiSystemPromptOverride(
+	installPhiSystemPrompt({
 		session,
-		buildPhiSystemPrompt({
-			assistantName: "Phi",
-			workspacePath: cwd,
-			skills: resourceLoader.getSkills().skills,
-			memoryFilePath: workspaceLayout.memoryFilePath,
-			toolNames: DEFAULT_PROMPT_TOOL_NAMES,
-		})
-	);
+		assistantName: "Phi",
+		workspacePath: cwd,
+		skills: resourceLoader.getSkills().skills,
+		memoryFilePath,
+		toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+	});
 	return session;
 }
 

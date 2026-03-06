@@ -6,9 +6,10 @@ This document describes the system prompt used by phi chat runtime sessions.
 
 ## Source Files
 
-- Prompt builder: `src/core/system-prompt.ts`
-- Prompt override helper: `src/core/system-prompt-override.ts`
-- Prompt application: `src/core/runtime.ts`
+- Prompt builder: `src/extensions/system-prompt/prompt.ts`
+- Prompt override helper: `src/extensions/system-prompt/override.ts`
+- Prompt installer: `src/extensions/system-prompt/install.ts`
+- Prompt application: `src/core/runtime.ts`, `src/commands/tui.ts`
 
 ## Where It Is Applied
 
@@ -29,11 +30,22 @@ This document describes the system prompt used by phi chat runtime sessions.
 
 Current runtime values:
 
+### Service chat
+
 - `assistantName`: `"Phi"`
 - `toolNames`: `read`, `bash`, `edit`, `write`
 - `workspacePath`: resolved from `chats.<chatId>.workspace` in `~/.phi/phi.yaml`
 - `skills`: from runtime `resourceLoader.getSkills().skills`
 - `memoryFilePath`: `<workspace>/.phi/memory/MEMORY.md`
+- `eventText`: not provided by default
+
+### TUI chat
+
+- `assistantName`: `"Phi"`
+- `toolNames`: `read`, `bash`, `edit`, `write`
+- `workspacePath`: current working directory
+- `skills`: loaded through TUI resource loading
+- `memoryFilePath`: `~/.phi/pi/memory/MEMORY.md`
 - `eventText`: not provided by default
 
 ## Prompt Sections
@@ -74,10 +86,12 @@ Memory maintenance before session switch / compaction is implemented separately 
 The system prompt only defines the memory rules.
 
 phi does not rely on `resourceLoader.systemPromptOverride` for chat runtime prompt ownership.
-Instead, runtime applies the built prompt to the session and monkey patches pi's internal base prompt rebuild path so later turns keep using the phi prompt.
+Instead, phi owns this as a dedicated extension module: it builds the prompt, applies it to the session, and monkey patches pi's internal base prompt rebuild path so later turns keep using the phi prompt.
 
 ## Configuration Surface
 
-- Prompt text/section logic: edit `src/core/system-prompt.ts`.
-- Runtime prompt inputs: edit `src/core/runtime.ts`.
-- Memory content: edit `<workspace>/.phi/memory/MEMORY.md`.
+- Prompt text/section logic: edit `src/extensions/system-prompt/prompt.ts`.
+- Prompt installation/override behavior: edit `src/extensions/system-prompt/install.ts` and `src/extensions/system-prompt/override.ts`.
+- Runtime prompt inputs: edit `src/core/runtime.ts` and `src/commands/tui.ts`.
+- Service chat memory content: edit `<workspace>/.phi/memory/MEMORY.md`.
+- TUI memory content: edit `~/.phi/pi/memory/MEMORY.md`.

@@ -18,3 +18,13 @@ export function getPhiSharedAuthFilePath(
 export function getPhiPiAgentDir(userHomeDir: string = homedir()): string {
 	return join(getPhiDir(userHomeDir), "pi");
 }
+
+export function getPhiPiMemoryDir(userHomeDir: string = homedir()): string {
+	return join(getPhiPiAgentDir(userHomeDir), "memory");
+}
+
+export function getPhiPiMemoryFilePath(
+	userHomeDir: string = homedir()
+): string {
+	return join(getPhiPiMemoryDir(userHomeDir), "MEMORY.md");
+}

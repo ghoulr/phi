@@ -15,8 +15,19 @@ We want two layers:
 
 ## Layout
 
+### Service chat
+
 ```text
 <chat-workspace>/.phi/
+└─ memory/
+   ├─ MEMORY.md
+   └─ YYYY-MM-DD.md
+```
+
+### TUI chat
+
+```text
+~/.phi/pi/
 └─ memory/
    ├─ MEMORY.md
    └─ YYYY-MM-DD.md
@@ -72,9 +83,18 @@ phi runs memory maintenance before:
 - session switch
 - compaction
 
+This behavior is owned by the pi extension at `src/extensions/memory-maintenance/`.
+
 The maintenance runs as a transient invisible turn.
 
 That turn may update memory files, but the turn itself is dropped from the main session history.
+
+For observability, the extension also:
+
+- shows a UI notification when maintenance starts, completes, or is skipped
+- appends a custom session entry with type `phi-memory-maintenance`
+- stores the same human-friendly status message in that entry
+- stores the maintenance prompt and the final assistant text for debugging
 
 ## Why This Shape
 
