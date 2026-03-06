@@ -74,9 +74,9 @@ The memory section now uses stricter write rules.
 It tells the agent:
 
 - `MEMORY.md` is for durable facts and explicit "remember this" requests
-- when the user asks to remember something, write it to `.phi/memory/MEMORY.md`
+- when the user asks to remember something, write it to the resolved `MEMORY.md` path for the current chat
 - keep `MEMORY.md` small and concise, and rewrite it when needed
-- `.phi/memory/YYYY-MM-DD.md` is for raw daily notes and working context
+- `YYYY-MM-DD.md` is for raw daily notes and working context
 - daily notes are not auto-injected; grep and read them on demand
 - current `MEMORY.md` content is appended when non-empty
 

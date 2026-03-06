@@ -13,7 +13,7 @@ A transient turn:
 - can read and write real files
 - is not kept in the main session history
 
-Only file side effects remain.
+Only file side effects remain in workspace state. Debug observability is stored separately through custom session entries when the caller chooses to do so.
 
 ## Current Use
 

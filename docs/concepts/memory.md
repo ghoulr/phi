@@ -50,7 +50,8 @@ Keep it short.
 
 ### `YYYY-MM-DD.md`
 
-Use for daily working notes.
+Use for dated daily working notes.
+Actual writes should target a concrete file such as `2026-03-06.md`.
 
 Examples:
 
@@ -72,7 +73,7 @@ Rules:
 2. Do not inject `YYYY-MM-DD.md` automatically.
 3. Write short durable facts to `MEMORY.md`.
 4. Keep `MEMORY.md` small and concise; rewrite it when needed.
-5. Write raw notes to `YYYY-MM-DD.md`.
+5. Write raw notes to the current dated daily note file such as `2026-03-06.md`.
 6. If the user explicitly says to remember something, write it to `MEMORY.md`.
 7. Daily notes should be found with grep/read on demand, not assumed to be in context.
 
@@ -95,6 +96,7 @@ For observability, the extension also:
 - appends a custom session entry with type `phi-memory-maintenance`
 - stores the same human-friendly status message in that entry
 - stores the maintenance prompt and the final assistant text for debugging
+- records the concrete dated daily memory path used by that run
 
 ## Why This Shape
 

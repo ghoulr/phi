@@ -1,6 +1,6 @@
 # phi
 
-Phi is a multi-user, multi-agent conversation system built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev), inspired by [openclaw](https://github.com/openclaw/openclaw).
+Phi is a chat runtime built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev), inspired by [openclaw](https://github.com/openclaw/openclaw).
 
 ## Architecture
 
@@ -66,13 +66,14 @@ Chat workspaces are configured in `phi.yaml`:
 
 ### TUI (Local Terminal)
 
-TUI runs as an independent pi instance for local ops:
+TUI is a special phi chat with global state under `~/.phi/pi`:
 
 ```bash
 bun index.ts tui
 ```
 
 In TUI, use `/login` directly when authentication is needed.
+Its working directory is only execution context. Phi state still lives under `~/.phi/pi`.
 
 ### Service
 
