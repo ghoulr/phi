@@ -13,8 +13,8 @@ This document describes the system prompt used by phi chat runtime sessions.
 ## Where It Is Applied
 
 - Applied to chat sessions created by runtime (`createDefaultAgentSession`).
-- Runtime uses an OpenClaw-style monkey patch to override pi session prompt rebuild behavior.
-- Current TUI session creation (`src/commands/tui.ts`) does not call `buildPhiSystemPrompt`.
+- Applied to TUI sessions created by `src/commands/tui.ts`.
+- Runtime and TUI both use an OpenClaw-style monkey patch to override pi session prompt rebuild behavior.
 
 ## Prompt Inputs
 

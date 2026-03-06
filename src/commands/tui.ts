@@ -11,12 +11,18 @@ import {
 	type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 
+import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 import { resolvePhiSkillPaths } from "@phi/core/skills";
+import { createPhiMemoryMaintenanceExtension } from "@phi/core/memory-maintenance";
+import { applyPhiSystemPromptOverride } from "@phi/core/system-prompt-override";
+import { buildPhiSystemPrompt } from "@phi/core/system-prompt";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
+
+const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
 
 function getTuiSessionsDir(agentDir: string): string {
 	return join(agentDir, "sessions");
@@ -26,6 +32,7 @@ export async function createDefaultTuiSession(
 	cwd: string = process.cwd(),
 	userHomeDir: string = homedir()
 ): Promise<AgentSession> {
+	const workspaceLayout = ensureChatWorkspaceLayout(cwd);
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const authStorage = AuthStorage.create(
 		getPhiSharedAuthFilePath(userHomeDir)
@@ -42,6 +49,8 @@ export async function createDefaultTuiSession(
 			workspaceDir: cwd,
 			userHomeDir,
 		}),
+		extensionFactories: [createPhiMemoryMaintenanceExtension()],
+		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();
 
@@ -56,6 +65,16 @@ export async function createDefaultTuiSession(
 		),
 		resourceLoader,
 	});
+	applyPhiSystemPromptOverride(
+		session,
+		buildPhiSystemPrompt({
+			assistantName: "Phi",
+			workspacePath: cwd,
+			skills: resourceLoader.getSkills().skills,
+			memoryFilePath: workspaceLayout.memoryFilePath,
+			toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+		})
+	);
 	return session;
 }
 
