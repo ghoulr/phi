@@ -39,6 +39,23 @@ describe("ensureTuiMemoryFile", () => {
 			rmSync(homeDir, { recursive: true, force: true });
 		}
 	});
+
+	it("does not create chat state under the current workspace", () => {
+		const homeDir = mkdtempSync(join(tmpdir(), "phi-tui-home-"));
+		const cwd = mkdtempSync(join(tmpdir(), "phi-tui-cwd-"));
+
+		try {
+			const memoryFilePath = ensureTuiMemoryFile(homeDir);
+
+			expect(memoryFilePath).toBe(
+				join(homeDir, ".phi", "pi", "memory", "MEMORY.md")
+			);
+			expect(existsSync(join(cwd, ".phi"))).toBe(false);
+		} finally {
+			rmSync(homeDir, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("runTuiCommand", () => {

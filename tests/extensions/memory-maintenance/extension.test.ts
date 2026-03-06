@@ -252,4 +252,38 @@ describe("createPhiMemoryMaintenanceExtension", () => {
 			dailyMemoryFilePath: expectedDailyMemoryFilePath,
 		});
 	});
+
+	it("uses a concrete global daily memory path for tui-style memory", async () => {
+		const harness = createExtensionHarness();
+		const calls: Array<{ prompt: string; snapshot: unknown }> = [];
+		const extension = createPhiMemoryMaintenanceExtension({
+			memoryFilePath: "/home/tester/.phi/pi/memory/MEMORY.md",
+			async runTransientTurn(params) {
+				calls.push(params);
+				return { assistantText: "maintenance complete" };
+			},
+		});
+
+		extension(harness.pi as never);
+
+		await harness.handlers.get("session_before_compact")?.(
+			{},
+			harness.ctx as never
+		);
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.prompt).toContain("/home/tester/.phi/pi/memory/");
+		expect(calls[0]?.prompt).not.toContain("YYYY-MM-DD.md");
+		expect(calls[0]?.prompt).toMatch(
+			/\/home\/tester\/.phi\/pi\/memory\/\d{4}-\d{2}-\d{2}\.md/
+		);
+		expect(harness.entries[1]?.data).toMatchObject({
+			reason: "compaction",
+			status: "completed",
+			assistantText: "maintenance complete",
+			dailyMemoryFilePath: expect.stringMatching(
+				/\/home\/tester\/.phi\/pi\/memory\/\d{4}-\d{2}-\d{2}\.md/
+			),
+		});
+	});
 });
