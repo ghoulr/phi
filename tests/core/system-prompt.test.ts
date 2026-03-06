@@ -59,7 +59,7 @@ describe("buildPhiSystemPrompt", () => {
 		}
 	});
 
-	it("omits conditional sections when content is empty", () => {
+	it("keeps memory rules even when MEMORY.md content is empty", () => {
 		const { dir, filePath } = createMemoryFile("# MEMORY\n");
 
 		try {
@@ -73,9 +73,33 @@ describe("buildPhiSystemPrompt", () => {
 			});
 
 			expect(prompt.includes("## Skills")).toBe(false);
-			expect(prompt.includes("## Memory")).toBe(false);
+			expect(prompt.includes("## Memory")).toBe(true);
+			expect(prompt.includes("remember this")).toBe(true);
+			expect(prompt.includes("keep it small and concise")).toBe(true);
+			expect(prompt.includes("grep and read them on demand")).toBe(true);
+			expect(prompt.includes("Current MEMORY.md")).toBe(false);
 			expect(prompt.includes("## Events & Replies")).toBe(false);
 			expect(prompt.includes("## Tools")).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("includes current MEMORY.md content when present", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\nremember this\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["read"],
+				eventText: "",
+			});
+
+			expect(prompt.includes("Current MEMORY.md")).toBe(true);
+			expect(prompt.includes("remember this")).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -16,7 +16,6 @@ import {
 	type DisposableSession,
 } from "@phi/core/chat-pool";
 import {
-	ensureChatSessionStorageDir,
 	ensureChatWorkspaceLayout,
 	resolveChatWorkspaceDirectory,
 } from "@phi/core/chat-workspace";
@@ -28,6 +27,8 @@ import {
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 import { resolvePhiSkillPaths } from "@phi/core/skills";
+import { createPhiMemoryMaintenanceExtension } from "./memory-maintenance";
+import { applyPhiSystemPromptOverride } from "./system-prompt-override";
 import { buildPhiSystemPrompt } from "./system-prompt";
 
 export {
@@ -53,6 +54,7 @@ async function createPhiResourceLoader(params: {
 			workspaceDir: params.cwd,
 			userHomeDir,
 		}),
+		extensionFactories: [createPhiMemoryMaintenanceExtension()],
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();
@@ -70,10 +72,6 @@ async function createDefaultAgentSession(
 		userHomeDir
 	);
 	const chatWorkspaceLayout = ensureChatWorkspaceLayout(chatWorkspaceDir);
-	const chatSessionStorageDir = ensureChatSessionStorageDir(
-		chatWorkspaceLayout.sessionsDir,
-		chatId
-	);
 
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const agentConfig = resolveAgentRuntimeConfig(
@@ -109,12 +107,13 @@ async function createDefaultAgentSession(
 		thinkingLevel: agentConfig.thinkingLevel,
 		sessionManager: SessionManager.continueRecent(
 			chatWorkspaceDir,
-			chatSessionStorageDir
+			chatWorkspaceLayout.sessionsDir
 		),
 		resourceLoader,
 	});
 
-	session.agent.setSystemPrompt(
+	applyPhiSystemPromptOverride(
+		session,
 		buildPhiSystemPrompt({
 			assistantName: "Phi",
 			workspacePath: chatWorkspaceDir,

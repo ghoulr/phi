@@ -141,6 +141,21 @@ function appendSection(lines: string[], title: string, body: string): void {
 	lines.push(title, normalized, "");
 }
 
+function buildMemorySection(memoryText: string): string {
+	const lines = [
+		"Persist important long-lived context in memory files.",
+		"",
+		'- Use `.phi/memory/MEMORY.md` for durable facts and explicit "remember this" requests, when user asks to remember anything, add to this file, keep it small and concise, rewrite it if necessary.',
+		"- Use `YYYY-MM-DD.md` in `.phi/memory/` for raw daily notes and working context.",
+		"- Daily notes are not auto-injected; grep and read them on demand when needed.",
+	];
+	if (!memoryText) {
+		return lines.join("\n");
+	}
+	lines.push("", "Current MEMORY.md:", "", memoryText);
+	return lines.join("\n");
+}
+
 export function buildPhiSystemPrompt(
 	params: BuildPhiSystemPromptParams
 ): string {
@@ -161,14 +176,7 @@ export function buildPhiSystemPrompt(
 	];
 
 	appendSection(lines, "## Skills", skillsText);
-	if (memoryText) {
-		appendSection(
-			lines,
-			"## Memory",
-			`Persist important long-lived context in memory files.\n\n${memoryText}`
-		);
-	}
-
+	appendSection(lines, "## Memory", buildMemorySection(memoryText));
 	appendSection(lines, "## Events & Replies", eventText);
 
 	lines.push("## Tools", toolsText, "", "Tool guidance:");

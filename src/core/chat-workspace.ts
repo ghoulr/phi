@@ -21,13 +21,6 @@ export interface ChatWorkspaceLayout {
 	memoryFilePath: string;
 }
 
-function encodeChatId(chatId: string): string {
-	if (chatId.length === 0) {
-		throw new Error("Chat id must not be empty.");
-	}
-	return Buffer.from(chatId, "utf-8").toString("base64url");
-}
-
 export function resolveChatWorkspaceDirectory(
 	workspace: string,
 	userHomeDir: string = homedir()
@@ -78,13 +71,4 @@ export function ensureChatWorkspaceLayout(
 		skillsDir,
 		memoryFilePath,
 	};
-}
-
-export function ensureChatSessionStorageDir(
-	sessionsDir: string,
-	chatId: string
-): string {
-	const chatSessionDir = join(sessionsDir, encodeChatId(chatId));
-	mkdirSync(chatSessionDir, { recursive: true });
-	return chatSessionDir;
 }

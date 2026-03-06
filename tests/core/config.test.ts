@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 
 import {
+	assertUniqueChatWorkspaces,
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
@@ -163,6 +164,78 @@ describe("phi config", () => {
 		).toThrow("No enabled telegram routes found in chats configuration.");
 	});
 
+	it("fails when enabled chats resolve to the same workspace", () => {
+		expect(() =>
+			assertUniqueChatWorkspaces(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "~/phi/shared",
+							agent: "main",
+						},
+						"user-bob": {
+							workspace: "~/phi/shared",
+							agent: "support",
+						},
+					},
+				},
+				"/home/tester"
+			)
+		).toThrow(
+			"Chats user-alice and user-bob resolve to the same workspace: /home/tester/phi/shared"
+		);
+	});
+
+	it("ignores disabled chats when checking unique workspaces", () => {
+		expect(() =>
+			assertUniqueChatWorkspaces(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "~/phi/shared",
+							agent: "main",
+						},
+						"user-bob": {
+							enabled: false,
+							workspace: "~/phi/shared",
+							agent: "support",
+						},
+					},
+				},
+				"/home/tester"
+			)
+		).not.toThrow();
+	});
+
+	it("fails resolving telegram routes when workspaces collide", () => {
+		expect(() =>
+			resolveTelegramChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						workspace: "~/phi/shared",
+						agent: "main",
+						routes: {
+							telegram: {
+								id: "1001",
+								token: "token",
+							},
+						},
+					},
+					"user-bob": {
+						workspace: "~/phi/shared",
+						agent: "support",
+						routes: {
+							telegram: {
+								id: "1002",
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toThrow("resolve to the same workspace");
+	});
+
 	it("resolves chat runtime config from phi config", () => {
 		expect(
 			resolveChatRuntimeConfig(
@@ -198,6 +271,26 @@ describe("phi config", () => {
 				"user-alice"
 			)
 		).toThrow("Chat is disabled in phi config: user-alice");
+	});
+
+	it("fails resolving chat runtime config when workspaces collide", () => {
+		expect(() =>
+			resolveChatRuntimeConfig(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "~/phi/shared",
+							agent: "main",
+						},
+						"user-bob": {
+							workspace: "~/phi/shared",
+							agent: "support",
+						},
+					},
+				},
+				"user-alice"
+			)
+		).toThrow("resolve to the same workspace");
 	});
 
 	it("fails when chat runtime workspace is missing", () => {

@@ -10,6 +10,8 @@ See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 
 - [System Prompt](./docs/concepts/system-prompt.md)
 - [Skills](./docs/concepts/skills.md)
+- [Memory](./docs/concepts/memory.md)
+- [Transient Turn](./docs/concepts/transient-turn.md)
 
 ```
                     ┌─────────┐

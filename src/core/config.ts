@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 
 import { parse } from "yaml";
 
+import { resolveChatWorkspaceDirectory } from "@phi/core/chat-workspace";
 import { getPhiConfigFilePath } from "@phi/core/paths";
 
 export type PhiThinkingLevel =
@@ -138,9 +139,44 @@ export function loadPhiConfig(configFilePath: string): PhiConfig {
 	return rawConfig as PhiConfig;
 }
 
+export function assertUniqueChatWorkspaces(
+	phiConfig: PhiConfig,
+	userHomeDir: string = homedir()
+): void {
+	const chats = phiConfig.chats;
+	if (!chats) {
+		throw new Error("Missing chats configuration in phi config.");
+	}
+
+	const workspaceOwners = new Map<string, string>();
+	for (const [chatId, chatConfig] of Object.entries(chats)) {
+		if (chatConfig.enabled === false) {
+			continue;
+		}
+
+		const resolvedChat = resolveChatRuntimeConfigFromEntry(
+			chatId,
+			chatConfig
+		);
+		const resolvedWorkspace = resolveChatWorkspaceDirectory(
+			resolvedChat.workspace,
+			userHomeDir
+		);
+		const existingChatId = workspaceOwners.get(resolvedWorkspace);
+		if (existingChatId) {
+			throw new Error(
+				`Chats ${existingChatId} and ${chatId} resolve to the same workspace: ${resolvedWorkspace}`
+			);
+		}
+		workspaceOwners.set(resolvedWorkspace, chatId);
+	}
+}
+
 export function resolveTelegramChatServiceConfigs(
 	phiConfig: PhiConfig
 ): ResolvedTelegramChatServiceConfig[] {
+	assertUniqueChatWorkspaces(phiConfig);
+
 	const chats = phiConfig.chats;
 	if (!chats) {
 		throw new Error("Missing chats configuration in phi config.");
@@ -191,6 +227,8 @@ export function resolveChatRuntimeConfig(
 	phiConfig: PhiConfig,
 	chatId: string
 ): ResolvedChatRuntimeConfig {
+	assertUniqueChatWorkspaces(phiConfig);
+
 	const chats = phiConfig.chats;
 	if (!chats) {
 		throw new Error("Missing chats configuration in phi config.");
