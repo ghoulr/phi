@@ -16,3 +16,5 @@
 - [ ] Revisit multi-session/thread semantics per chat.
   - Keep current "one chat => continue recent session" behavior for now.
   - Re-evaluate when business scenarios require explicit thread/session branching.
+
+- [ ] ask agent to respond in correct rich text format for specific channel

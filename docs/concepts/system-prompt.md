@@ -56,15 +56,22 @@ Rendered in this order:
 2. `## Workspace Layout`
 3. `## Skills` (only when skills text is non-empty)
 4. `## Memory` (always included)
-5. `## Events & Replies` (only when `eventText` is non-empty)
-6. `## Tools`
-7. Tool guidance bullets
+5. `## Tools`
+6. Tool guidance bullets
+7. `## Message Format`
+
+## Message Format Rules
+
+The system prompt tells the agent:
+
+- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context
+- it is not user-authored input, it carries metadata for the current message
+- message text is still the actual user input; `system_reminder` only adds metadata
 
 ## Tool Text and Guidance
 
 - Tool list is built from `toolNames` with de-duplication (first occurrence kept).
 - Known tool descriptions are defined in `TOOL_DESCRIPTION_MAP`.
-- Guidance always includes: `Use the appropriate tool directly when available.`
 - Additional guidance lines are included conditionally based on enabled tools.
 
 ## Memory Rules in Prompt

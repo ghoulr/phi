@@ -125,6 +125,7 @@ describe("startCronService", () => {
 					return {
 						assistantMessage: createAssistantMessage("done"),
 						assistantText: "done",
+						outboundMessages: [{ text: "done", attachments: [] }],
 					};
 				},
 				async publishResult() {
@@ -194,6 +195,7 @@ describe("startCronService", () => {
 					return {
 						assistantMessage: createAssistantMessage("done"),
 						assistantText: "done",
+						outboundMessages: [{ text: "done", attachments: [] }],
 					};
 				},
 				async publishResult() {},

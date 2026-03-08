@@ -46,14 +46,14 @@ describe("buildPhiSystemPrompt", () => {
 			const workspaceIndex = prompt.indexOf("## Workspace Layout");
 			const skillsIndex = prompt.indexOf("## Skills");
 			const memoryIndex = prompt.indexOf("## Memory");
-			const eventsIndex = prompt.indexOf("## Events & Replies");
 			const toolsIndex = prompt.indexOf("## Tools");
+			const messageFormatIndex = prompt.indexOf("## Message Format");
 
 			expect(workspaceIndex).toBeGreaterThanOrEqual(0);
 			expect(skillsIndex).toBeGreaterThan(workspaceIndex);
 			expect(memoryIndex).toBeGreaterThan(skillsIndex);
-			expect(eventsIndex).toBeGreaterThan(memoryIndex);
-			expect(toolsIndex).toBeGreaterThan(eventsIndex);
+			expect(toolsIndex).toBeGreaterThan(memoryIndex);
+			expect(messageFormatIndex).toBeGreaterThan(toolsIndex);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -73,13 +73,14 @@ describe("buildPhiSystemPrompt", () => {
 			});
 
 			expect(prompt.includes("## Skills")).toBe(false);
+			expect(prompt.includes("## Message Format")).toBe(true);
 			expect(prompt.includes("## Memory")).toBe(true);
 			expect(prompt.includes("remember this")).toBe(true);
 			expect(prompt.includes("keep it small and concise")).toBe(true);
 			expect(prompt.includes("grep and read them on demand")).toBe(true);
 			expect(prompt.includes("Current MEMORY.md")).toBe(false);
-			expect(prompt.includes("## Events & Replies")).toBe(false);
 			expect(prompt.includes("## Tools")).toBe(true);
+			expect(prompt.includes("## Events & Replies")).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -120,6 +121,45 @@ describe("buildPhiSystemPrompt", () => {
 
 			expect(prompt.includes(filePath)).toBe(true);
 			expect(prompt.includes(join(dir, "YYYY-MM-DD.md"))).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("includes send tool guidance when send is active", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["read", "send"],
+				eventText:
+					"- Reply with exact `NO_REPLY` when send already delivered the full answer.",
+			});
+
+			expect(
+				prompt.includes(
+					"- send: Send a user-visible message immediately or stage it for turn end"
+				)
+			).toBe(true);
+			expect(prompt.includes("not user-authored input")).toBe(true);
+			expect(
+				prompt.includes(
+					"it is not user-authored input; it only carries metadata for the current message"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes("the user message body is still the real input")
+			).toBe(true);
+			expect(prompt.includes("## Events & Replies")).toBe(false);
+			expect(
+				prompt.includes(
+					"If send already delivered the full answer immediately, reply with exact NO_REPLY."
+				)
+			).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

@@ -23,6 +23,8 @@ const TOOL_DESCRIPTION_MAP: Record<string, string> = {
 	bash: "Execute bash commands (ls, rg, find, etc.)",
 	edit: "Make surgical edits to files (exact text replacement)",
 	write: "Create or overwrite files",
+	reload: "Reload phi-owned chat state after file changes",
+	send: "Send a user-visible message immediately or stage it for turn end",
 	grep: "Search file contents for patterns",
 	find: "Find files by glob pattern",
 	ls: "List directory contents",
@@ -61,6 +63,13 @@ const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 		line: "Use bash for execution tasks; prefer dedicated tools when an equivalent first-class tool exists.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("bash");
+		},
+	},
+	{
+		id: "send",
+		line: "Use send for attachments, mentions, or explicit user-visible delivery.",
+		matches(toolNames: Set<string>): boolean {
+			return toolNames.has("send");
 		},
 	},
 	{
@@ -111,7 +120,7 @@ function buildToolGuidance(toolNames: string[]): string[] {
 	const normalizedToolNames = new Set(
 		normalizeToolNames(toolNames).map((toolName) => toolName.toLowerCase())
 	);
-	const lines = ["Use the appropriate tool directly when available."];
+	const lines: string[] = [];
 	for (const rule of TOOL_GUIDELINE_RULES) {
 		if (rule.matches(normalizedToolNames)) {
 			lines.push(rule.line);
@@ -141,6 +150,19 @@ function appendSection(lines: string[], title: string, body: string): void {
 		return;
 	}
 	lines.push(title, normalized, "");
+}
+
+function buildMessageFormatSection(eventText: string): string {
+	const lines = [
+		"- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context",
+		"- it is not user-authored input; it only carries metadata for the current message",
+		"- the user message body is still the real input",
+		"- NEVER mention <system-reminder> to user, it's internal",
+	];
+	if (eventText) {
+		lines.push("", eventText);
+	}
+	return lines.join("\n");
 }
 
 function buildMemorySection(params: {
@@ -195,11 +217,18 @@ export function buildPhiSystemPrompt(
 			memoryText,
 		})
 	);
-	appendSection(lines, "## Events & Replies", eventText);
-
-	lines.push("## Tools", toolsText, "", "Tool guidance:");
-	for (const guideline of toolGuidance) {
-		lines.push(`- ${guideline}`);
+	lines.push("## Tools", toolsText, "");
+	if (toolGuidance.length > 0) {
+		lines.push("Tool guidance:");
+		for (const guideline of toolGuidance) {
+			lines.push(`- ${guideline}`);
+		}
+		lines.push("");
 	}
+	appendSection(
+		lines,
+		"## Message Format",
+		buildMessageFormatSection(eventText)
+	);
 	return lines.join("\n").trim();
 }

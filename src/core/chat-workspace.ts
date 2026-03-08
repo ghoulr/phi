@@ -9,6 +9,7 @@ const LOGS_DIR = "logs";
 const SKILLS_DIR = "skills";
 const CRON_DIR = "cron";
 const CRON_JOBS_DIR = "jobs";
+const INBOX_DIR = "inbox";
 const LOGS_FILE_NAME = "logs.jsonl";
 const MEMORY_FILE_NAME = "MEMORY.md";
 const CRON_JOBS_FILE_NAME = "jobs.yaml";
@@ -22,6 +23,7 @@ export interface ChatWorkspaceLayout {
 	memoryDir: string;
 	logsDir: string;
 	skillsDir: string;
+	inboxDir: string;
 	cronDir: string;
 	cronJobsDir: string;
 	memoryFilePath: string;
@@ -53,6 +55,10 @@ export function getChatCronDirectoryPath(workspaceDir: string): string {
 	return join(workspaceDir, DOT_PHI_DIR, CRON_DIR);
 }
 
+export function getChatInboxDirectoryPath(workspaceDir: string): string {
+	return join(workspaceDir, DOT_PHI_DIR, INBOX_DIR);
+}
+
 export function getChatCronJobsDirectoryPath(workspaceDir: string): string {
 	return join(getChatCronDirectoryPath(workspaceDir), CRON_JOBS_DIR);
 }
@@ -75,6 +81,7 @@ export function ensureChatWorkspaceLayout(
 	const memoryDir = join(phiDir, MEMORY_DIR);
 	const logsDir = join(phiDir, LOGS_DIR);
 	const skillsDir = join(phiDir, SKILLS_DIR);
+	const inboxDir = join(phiDir, INBOX_DIR);
 	const cronDir = join(phiDir, CRON_DIR);
 	const cronJobsDir = join(cronDir, CRON_JOBS_DIR);
 	const memoryFilePath = join(memoryDir, MEMORY_FILE_NAME);
@@ -85,6 +92,7 @@ export function ensureChatWorkspaceLayout(
 	mkdirSync(memoryDir, { recursive: true });
 	mkdirSync(logsDir, { recursive: true });
 	mkdirSync(skillsDir, { recursive: true });
+	mkdirSync(inboxDir, { recursive: true });
 	mkdirSync(cronDir, { recursive: true });
 	mkdirSync(cronJobsDir, { recursive: true });
 
@@ -99,6 +107,7 @@ export function ensureChatWorkspaceLayout(
 		memoryDir,
 		logsDir,
 		skillsDir,
+		inboxDir,
 		cronDir,
 		cronJobsDir,
 		memoryFilePath,

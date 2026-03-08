@@ -5,6 +5,7 @@ import {
 	AuthStorage,
 	createAgentSession,
 	DefaultResourceLoader,
+	type ExtensionFactory,
 	ModelRegistry,
 	type AgentSession,
 	SessionManager,
@@ -30,6 +31,10 @@ import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 import { resolvePhiSkillPaths } from "@phi/core/skills";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
+import {
+	registerPhiMessagingSessionState,
+	type PhiMessagingSessionState,
+} from "@phi/messaging/session-state";
 
 export {
 	ChatSessionPool,
@@ -43,10 +48,17 @@ const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
 export interface CreatePhiAgentSessionOptions {
 	sessionManager?: SessionManager;
 	customTools?: ToolDefinition[];
+	extensionFactories?: ExtensionFactory[];
+	additionalPromptToolNames?: string[];
+	eventText?: string;
+	messagingState?: PhiMessagingSessionState;
 }
 
 export interface PhiRuntimeDependencies {
 	getCustomTools?(chatId: string): ToolDefinition[];
+	getExtensionFactories?(chatId: string): ExtensionFactory[];
+	getAdditionalPromptToolNames?(chatId: string): string[];
+	getEventText?(chatId: string): string | undefined;
 }
 
 interface ResolvedPhiSessionContext {
@@ -64,6 +76,7 @@ async function createPhiResourceLoader(params: {
 	cwd: string;
 	agentDir: string;
 	userHomeDir?: string;
+	extensionFactories?: ExtensionFactory[];
 }): Promise<DefaultResourceLoader> {
 	const userHomeDir = params.userHomeDir ?? homedir();
 	const resourceLoader = new DefaultResourceLoader({
@@ -78,6 +91,7 @@ async function createPhiResourceLoader(params: {
 			createPhiMemoryMaintenanceExtension({
 				memoryFilePath: ".phi/memory/MEMORY.md",
 			}),
+			...(params.extensionFactories ?? []),
 		],
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
@@ -87,7 +101,8 @@ async function createPhiResourceLoader(params: {
 
 async function resolvePhiSessionContext(
 	chatId: string,
-	phiConfig: PhiConfig
+	phiConfig: PhiConfig,
+	options: Pick<CreatePhiAgentSessionOptions, "extensionFactories">
 ): Promise<ResolvedPhiSessionContext> {
 	const userHomeDir = homedir();
 	const chatConfig = resolveChatRuntimeConfig(phiConfig, chatId);
@@ -120,6 +135,7 @@ async function resolvePhiSessionContext(
 		cwd: chatWorkspaceDir,
 		agentDir,
 		userHomeDir,
+		extensionFactories: options.extensionFactories,
 	});
 
 	return {
@@ -135,16 +151,14 @@ async function resolvePhiSessionContext(
 }
 
 function buildPromptToolNames(
-	customTools: ToolDefinition[] | undefined
+	customTools: ToolDefinition[] | undefined,
+	additionalToolNames: string[] | undefined
 ): string[] {
-	if (!customTools || customTools.length === 0) {
-		return DEFAULT_PROMPT_TOOL_NAMES;
-	}
-
 	return Array.from(
 		new Set([
 			...DEFAULT_PROMPT_TOOL_NAMES,
-			...customTools.map((tool) => tool.name),
+			...(customTools ?? []).map((tool) => tool.name),
+			...(additionalToolNames ?? []),
 		])
 	);
 }
@@ -154,7 +168,9 @@ export async function createPhiAgentSession(
 	phiConfig: PhiConfig,
 	options: CreatePhiAgentSessionOptions = {}
 ): Promise<AgentSession> {
-	const context = await resolvePhiSessionContext(chatId, phiConfig);
+	const context = await resolvePhiSessionContext(chatId, phiConfig, {
+		extensionFactories: options.extensionFactories,
+	});
 
 	const { session } = await createAgentSession({
 		cwd: context.chatWorkspaceDir,
@@ -179,8 +195,15 @@ export async function createPhiAgentSession(
 		workspacePath: context.chatWorkspaceDir,
 		skills: context.resourceLoader.getSkills().skills,
 		memoryFilePath: context.chatWorkspaceLayout.memoryFilePath,
-		toolNames: buildPromptToolNames(options.customTools),
+		toolNames: buildPromptToolNames(
+			options.customTools,
+			options.additionalPromptToolNames
+		),
+		eventText: options.eventText,
 	});
+	if (options.messagingState) {
+		registerPhiMessagingSessionState(session, options.messagingState);
+	}
 	return session;
 }
 
@@ -191,6 +214,10 @@ async function createDefaultAgentSession(
 ): Promise<AgentSession> {
 	return await createPhiAgentSession(chatId, phiConfig, {
 		customTools: dependencies.getCustomTools?.(chatId) ?? [],
+		extensionFactories: dependencies.getExtensionFactories?.(chatId) ?? [],
+		additionalPromptToolNames:
+			dependencies.getAdditionalPromptToolNames?.(chatId) ?? [],
+		eventText: dependencies.getEventText?.(chatId),
 	});
 }
 

@@ -1,6 +1,7 @@
 import {
 	SessionManager,
 	type AgentSession,
+	type ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 
@@ -25,6 +26,15 @@ import type {
 	CronRunResult,
 	LoadedCronJob,
 } from "@phi/cron/types";
+import {
+	buildPhiMessagingEventText,
+	createPhiMessagingExtension,
+} from "@phi/extensions/messaging";
+import type { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
+import {
+	PhiMessagingSessionState,
+	resolvePhiSessionTurnOutput,
+} from "@phi/messaging/session-state";
 
 const EMPTY_USAGE = {
 	input: 0,
@@ -56,72 +66,150 @@ export interface CronServiceDependencies {
 		runtime: ChatSessionRuntime<AgentSession>,
 		chatExecutor: ChatExecutor,
 		chatId: string,
-		assistantMessage: AssistantMessage
+		result: CronRunResult
 	): Promise<void>;
 }
 
-const defaultCronServiceDependencies: CronServiceDependencies = {
-	async runJob(
-		chatId: string,
-		phiConfig: PhiConfig,
-		prompt: string
-	): Promise<CronRunResult> {
-		const session = await createPhiAgentSession(chatId, phiConfig, {
-			sessionManager: SessionManager.inMemory(),
-		});
-		try {
-			await session.sendUserMessage(prompt);
-			const assistantMessage = session.messages
-				.slice()
-				.reverse()
-				.find(
-					(message): message is AssistantMessage =>
-						message.role === "assistant"
-				);
-			if (!assistantMessage) {
-				throw new Error(
-					`Cron job returned no assistant message for chat ${chatId}`
-				);
-			}
+function getLastAssistantMessage(
+	session: AgentSession
+): AssistantMessage | undefined {
+	return session.messages
+		.slice()
+		.reverse()
+		.find(
+			(message): message is AssistantMessage =>
+				message.role === "assistant"
+		);
+}
 
-			const assistantText = assistantMessage.content
-				.filter((content) => content.type === "text")
-				.map((content) => content.text)
-				.join("")
-				.trim();
-			if (assistantText.length === 0) {
-				throw new Error(
-					`Cron job returned empty assistant text for chat ${chatId}`
-				);
-			}
+function createPublishedAssistantMessage(
+	assistantMessage: AssistantMessage | undefined,
+	assistantText: string | undefined
+): AssistantMessage | undefined {
+	if (!assistantMessage || !assistantText) {
+		return undefined;
+	}
+	return {
+		...assistantMessage,
+		content: [{ type: "text", text: assistantText }],
+		timestamp: Date.now(),
+	};
+}
 
-			return {
-				assistantMessage: {
-					...assistantMessage,
-					content: [{ type: "text", text: assistantText }],
-					timestamp: Date.now(),
-				},
-				assistantText,
-			};
-		} finally {
-			session.dispose();
-		}
-	},
-	async publishResult(
-		runtime: ChatSessionRuntime<AgentSession>,
-		chatExecutor: ChatExecutor,
-		chatId: string,
-		assistantMessage: AssistantMessage
-	): Promise<void> {
-		await chatExecutor.run(chatId, async () => {
-			const session = await runtime.getOrCreateSession(chatId);
-			session.sessionManager.appendMessage(assistantMessage);
-			session.agent.replaceMessages(
-				session.sessionManager.buildSessionContext().messages
-			);
-		});
-	},
-};
+function buildCronLogText(result: CronRunResult): string {
+	return result.outboundMessages
+		.map((message) => {
+			const attachments = message.attachments
+				.map((attachment) => attachment.name)
+				.join(", ");
+			if (message.text && attachments) {
+				return `${message.text}\n[attachments: ${attachments}]`;
+			}
+			return message.text ?? `[attachments: ${attachments}]`;
+		})
+		.join("\n\n")
+		.trim();
+}
+
+function createMessagingExtensionFactories(params: {
+	chatId: string;
+	deliveryRegistry: PhiRouteDeliveryRegistry;
+	state: PhiMessagingSessionState;
+}): ExtensionFactory[] {
+	return [
+		createPhiMessagingExtension({
+			state: params.state,
+			deliverMessage: async (message) => {
+				await params.deliveryRegistry
+					.require(params.chatId)
+					.deliver(message);
+			},
+		}),
+	];
+}
+
+function createDefaultCronServiceDependencies(
+	deliveryRegistry?: PhiRouteDeliveryRegistry
+): CronServiceDependencies {
+	return {
+		async runJob(
+			chatId: string,
+			phiConfig: PhiConfig,
+			prompt: string
+		): Promise<CronRunResult> {
+			const messagingState = new PhiMessagingSessionState();
+			const session = await createPhiAgentSession(chatId, phiConfig, {
+				sessionManager: SessionManager.inMemory(),
+				messagingState,
+				extensionFactories: deliveryRegistry
+					? createMessagingExtensionFactories({
+							chatId,
+							deliveryRegistry,
+							state: messagingState,
+						})
+					: [],
+				additionalPromptToolNames: deliveryRegistry ? ["send"] : [],
+				eventText: deliveryRegistry
+					? buildPhiMessagingEventText()
+					: undefined,
+			});
+			try {
+				await session.sendUserMessage(prompt);
+				const assistantText = session.getLastAssistantText();
+				if (!assistantText) {
+					throw new Error(
+						`Cron job returned empty assistant text for chat ${chatId}`
+					);
+				}
+
+				const outboundMessages = resolvePhiSessionTurnOutput(
+					session,
+					assistantText
+				);
+				const visibleText = outboundMessages
+					.map((message) => message.text)
+					.find(
+						(text): text is string =>
+							typeof text === "string" && text.length > 0
+					);
+				return {
+					assistantMessage: createPublishedAssistantMessage(
+						getLastAssistantMessage(session),
+						visibleText
+					),
+					assistantText: visibleText,
+					outboundMessages,
+				};
+			} finally {
+				session.dispose();
+			}
+		},
+		async publishResult(
+			runtime: ChatSessionRuntime<AgentSession>,
+			chatExecutor: ChatExecutor,
+			chatId: string,
+			result: CronRunResult
+		): Promise<void> {
+			await chatExecutor.run(chatId, async () => {
+				if (result.assistantMessage) {
+					const session = await runtime.getOrCreateSession(chatId);
+					session.sessionManager.appendMessage(
+						result.assistantMessage
+					);
+					session.agent.replaceMessages(
+						session.sessionManager.buildSessionContext().messages
+					);
+				}
+				if (!deliveryRegistry) {
+					return;
+				}
+				for (const message of result.outboundMessages) {
+					await deliveryRegistry.require(chatId).deliver(message);
+				}
+			});
+		},
+	};
+}
 
 function createAssistantErrorMessage(
 	session: AgentSession,
@@ -155,6 +243,7 @@ class ChatCronScheduler {
 		private readonly phiConfig: PhiConfig,
 		private readonly runtime: ChatSessionRuntime<AgentSession>,
 		private readonly chatExecutor: ChatExecutor,
+		private readonly deliveryRegistry: PhiRouteDeliveryRegistry | undefined,
 		private readonly dependencies: CronServiceDependencies
 	) {}
 
@@ -291,13 +380,13 @@ class ChatCronScheduler {
 				this.runtime,
 				this.chatExecutor,
 				this.chatConfig.chatId,
-				result.assistantMessage
+				result
 			);
 			appendCronRunLog(layout.cronRunsFilePath, {
 				chatId: this.chatConfig.chatId,
 				jobId: job.id,
 				status: "ok",
-				text: result.assistantText,
+				text: buildCronLogText(result),
 				startedAt,
 				finishedAt: new Date().toISOString(),
 			});
@@ -329,6 +418,14 @@ class ChatCronScheduler {
 			session.agent.replaceMessages(
 				session.sessionManager.buildSessionContext().messages
 			);
+			if (this.deliveryRegistry) {
+				await this.deliveryRegistry
+					.require(this.chatConfig.chatId)
+					.deliver({
+						text: `Cron job failed: ${message}`,
+						attachments: [],
+					});
+			}
 		});
 	}
 }
@@ -339,9 +436,12 @@ export async function startCronService(params: {
 	chatExecutor: ChatExecutor;
 	reloadRegistry: ChatReloadRegistry;
 	chatConfigs: ResolvedCronChatServiceConfig[];
+	deliveryRegistry?: PhiRouteDeliveryRegistry;
 	dependencies?: CronServiceDependencies;
 }): Promise<RunningCronService> {
-	const dependencies = params.dependencies ?? defaultCronServiceDependencies;
+	const dependencies =
+		params.dependencies ??
+		createDefaultCronServiceDependencies(params.deliveryRegistry);
 	const schedulers = new Map<string, ChatCronScheduler>();
 	const unregisterHandlers: Array<() => void> = [];
 	let stopped = false;
@@ -356,6 +456,7 @@ export async function startCronService(params: {
 			params.phiConfig,
 			params.runtime,
 			params.chatExecutor,
+			params.deliveryRegistry,
 			dependencies
 		);
 		await scheduler.start();
