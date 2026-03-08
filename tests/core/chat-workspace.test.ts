@@ -26,6 +26,8 @@ describe("ensureChatWorkspaceLayout", () => {
 			expect(existsSync(layout.memoryDir)).toBe(true);
 			expect(existsSync(layout.logsDir)).toBe(true);
 			expect(existsSync(layout.skillsDir)).toBe(true);
+			expect(existsSync(layout.cronDir)).toBe(true);
+			expect(existsSync(layout.cronJobsDir)).toBe(true);
 			expect(existsSync(layout.memoryFilePath)).toBe(true);
 		} finally {
 			rmSync(root, { recursive: true, force: true });

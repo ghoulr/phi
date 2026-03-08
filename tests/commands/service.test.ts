@@ -8,6 +8,7 @@ import {
 } from "@phi/commands/service";
 import type {
 	PhiConfig,
+	ResolvedCronChatServiceConfig,
 	ResolvedTelegramChatServiceConfig,
 } from "@phi/core/config";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
@@ -35,13 +36,41 @@ function createChatConfig(
 	};
 }
 
+function createCronChatConfig(
+	overrides?: Partial<ResolvedCronChatServiceConfig>
+): ResolvedCronChatServiceConfig {
+	return {
+		chatId: "user-alice",
+		workspace: "~/phi/workspaces/alice",
+		timezone: "Asia/Shanghai",
+		...overrides,
+	};
+}
+
+function createRunningServiceStub(stopCalls?: { value: number }) {
+	let resolveDone: (() => void) | undefined;
+	const done = new Promise<void>((resolve) => {
+		resolveDone = resolve;
+	});
+
+	return {
+		done,
+		async stop(): Promise<void> {
+			if (stopCalls) {
+				stopCalls.value += 1;
+			}
+			resolveDone?.();
+		},
+	};
+}
+
 describe("service command", () => {
 	it("starts grouped telegram bots from chat routes", async () => {
 		const startedBotConfigs: Array<{
 			token: string;
 			chatRoutes: Record<string, { chatId: string; workspace: string }>;
 		}> = [];
-		const dependencies: ServiceCommandDependencies = {
+		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
 				return [
 					createChatConfig({
@@ -63,20 +92,26 @@ describe("service command", () => {
 					}),
 				];
 			},
+			resolveCronChats(): ResolvedCronChatServiceConfig[] {
+				return [createCronChatConfig()];
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub();
+			},
 			async startTelegramBot(_runtime, config) {
 				startedBotConfigs.push(config);
-				return {
-					done: Promise.resolve(),
-					async stop(): Promise<void> {},
-				};
+				return createRunningServiceStub();
 			},
 		};
 
-		await runServiceCommand(
+		const service = runServiceCommand(
 			fakeRuntime,
 			{} satisfies PhiConfig,
 			dependencies
 		);
+		await Bun.sleep(0);
+		process.emit("SIGTERM");
+		await service;
 		expect(startedBotConfigs).toEqual([
 			{
 				token: "t1",
@@ -104,7 +139,7 @@ describe("service command", () => {
 	});
 
 	it("fails fast when duplicate telegram route exists under same token", async () => {
-		const dependencies: ServiceCommandDependencies = {
+		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
 				return [
 					createChatConfig({
@@ -118,6 +153,15 @@ describe("service command", () => {
 						token: "t1",
 					}),
 				];
+			},
+			resolveCronChats(): ResolvedCronChatServiceConfig[] {
+				return [createCronChatConfig()];
+			},
+			async startCronRuntime() {
+				return {
+					done: new Promise(() => {}),
+					async stop(): Promise<void> {},
+				};
 			},
 			async startTelegramBot() {
 				throw new Error(
@@ -134,32 +178,31 @@ describe("service command", () => {
 	});
 
 	it("stops already started bots when one bot fails to start", async () => {
-		let stopCalls = 0;
-		const dependencies: ServiceCommandDependencies = {
+		const stopCalls = { value: 0 };
+		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
 				return [
 					createChatConfig({ telegramChatId: "1001", token: "t1" }),
 					createChatConfig({ telegramChatId: "2001", token: "t2" }),
 				];
 			},
+			resolveCronChats(): ResolvedCronChatServiceConfig[] {
+				return [createCronChatConfig()];
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub(stopCalls);
+			},
 			async startTelegramBot(_runtime, config) {
 				if (config.token === "t2") {
 					throw new Error("startup failed");
 				}
-				return {
-					done: new Promise(() => {
-						// Keep pending to simulate long-running polling.
-					}),
-					async stop(): Promise<void> {
-						stopCalls += 1;
-					},
-				};
+				return createRunningServiceStub(stopCalls);
 			},
 		};
 
 		await expect(
 			runServiceCommand(fakeRuntime, {} satisfies PhiConfig, dependencies)
 		).rejects.toThrow("startup failed");
-		expect(stopCalls).toBe(1);
+		expect(stopCalls.value).toBe(2);
 	});
 });

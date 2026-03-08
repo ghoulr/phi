@@ -22,6 +22,8 @@
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.55.4",
     "cac": "^6.7.14",
-    "grammy": "^1.40.1"
+    "croner": "^9.1.0",
+    "grammy": "^1.40.1",
+    "yaml": "^2.8.1"
   }
 }

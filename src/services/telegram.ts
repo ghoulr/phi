@@ -5,6 +5,10 @@ import type {
 import { Bot, type BotError, type Context } from "grammy";
 
 import {
+	InMemoryChatExecutor,
+	type ChatExecutor,
+} from "@phi/core/chat-executor";
+import {
 	appendChatLogEntry,
 	hasOutboundChatLogEntry,
 } from "@phi/core/chat-log";
@@ -13,10 +17,6 @@ import {
 	getChatLogsFilePath,
 	resolveChatWorkspaceDirectory,
 } from "@phi/core/chat-workspace";
-import {
-	InMemoryJobQueueProvider,
-	type JobQueueProvider,
-} from "@phi/core/job-queue";
 import {
 	chunkTextForOutbound,
 	sanitizeInboundText,
@@ -50,7 +50,6 @@ export interface TelegramPollingBot {
 
 export interface TelegramServiceDependencies {
 	createBot(token: string): TelegramPollingBot;
-	createJobQueueProvider?(): JobQueueProvider;
 }
 
 export interface RunningTelegramPollingBot {
@@ -214,9 +213,6 @@ const defaultTelegramServiceDependencies: TelegramServiceDependencies = {
 	createBot(token: string): TelegramPollingBot {
 		return new GrammyPollingBot(token);
 	},
-	createJobQueueProvider(): JobQueueProvider {
-		return new InMemoryJobQueueProvider();
-	},
 };
 
 async function processTelegramAgentTurn(
@@ -320,13 +316,20 @@ async function handleTelegramTextMessage(
 export async function startTelegramPollingBot(
 	runtime: ChatSessionRuntime<AgentSession>,
 	config: ResolvedTelegramPollingBotConfig,
-	dependencies: TelegramServiceDependencies = defaultTelegramServiceDependencies
+	chatExecutorOrDependencies:
+		| ChatExecutor
+		| TelegramServiceDependencies = new InMemoryChatExecutor(),
+	dependenciesArg: TelegramServiceDependencies = defaultTelegramServiceDependencies
 ): Promise<RunningTelegramPollingBot> {
+	const chatExecutor =
+		"run" in chatExecutorOrDependencies
+			? chatExecutorOrDependencies
+			: new InMemoryChatExecutor();
+	const dependencies =
+		"run" in chatExecutorOrDependencies
+			? dependenciesArg
+			: chatExecutorOrDependencies;
 	const bot = dependencies.createBot(config.token);
-	const queueProvider =
-		dependencies.createJobQueueProvider?.() ??
-		new InMemoryJobQueueProvider();
-	const queue = queueProvider.createQueue(`telegram:${config.token}`);
 
 	bot.onError((error: unknown) => {
 		const normalizedError = normalizeUnknownError(error);
@@ -336,7 +339,10 @@ export async function startTelegramPollingBot(
 	});
 
 	bot.onTextMessage(async (context: TelegramTextMessageContext) => {
-		await queue.enqueue(String(context.chat.id), async () => {
+		const telegramChatId = normalizeTelegramChatId(context.chat.id);
+		const queueKey =
+			config.chatRoutes[telegramChatId]?.chatId ?? telegramChatId;
+		await chatExecutor.run(queueKey, async () => {
 			try {
 				await handleTelegramTextMessage(
 					runtime,

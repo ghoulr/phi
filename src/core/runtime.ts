@@ -8,6 +8,7 @@ import {
 	ModelRegistry,
 	type AgentSession,
 	SessionManager,
+	type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 
 import {
@@ -39,6 +40,26 @@ export {
 
 const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
 
+export interface CreatePhiAgentSessionOptions {
+	sessionManager?: SessionManager;
+	customTools?: ToolDefinition[];
+}
+
+export interface PhiRuntimeDependencies {
+	getCustomTools?(chatId: string): ToolDefinition[];
+}
+
+interface ResolvedPhiSessionContext {
+	agentDir: string;
+	agentConfig: ReturnType<typeof resolveAgentRuntimeConfig>;
+	authStorage: AuthStorage;
+	modelRegistry: ModelRegistry;
+	model: NonNullable<AgentSession["model"]>;
+	chatWorkspaceDir: string;
+	chatWorkspaceLayout: ReturnType<typeof ensureChatWorkspaceLayout>;
+	resourceLoader: DefaultResourceLoader;
+}
+
 async function createPhiResourceLoader(params: {
 	cwd: string;
 	agentDir: string;
@@ -64,10 +85,10 @@ async function createPhiResourceLoader(params: {
 	return resourceLoader;
 }
 
-async function createDefaultAgentSession(
+async function resolvePhiSessionContext(
 	chatId: string,
 	phiConfig: PhiConfig
-): Promise<AgentSession> {
+): Promise<ResolvedPhiSessionContext> {
 	const userHomeDir = homedir();
 	const chatConfig = resolveChatRuntimeConfig(phiConfig, chatId);
 	const chatWorkspaceDir = resolveChatWorkspaceDirectory(
@@ -101,29 +122,76 @@ async function createDefaultAgentSession(
 		userHomeDir,
 	});
 
-	const { session } = await createAgentSession({
-		cwd: chatWorkspaceDir,
+	return {
 		agentDir,
+		agentConfig,
 		authStorage,
 		modelRegistry,
 		model,
-		thinkingLevel: agentConfig.thinkingLevel,
-		sessionManager: SessionManager.continueRecent(
-			chatWorkspaceDir,
-			chatWorkspaceLayout.sessionsDir
-		),
+		chatWorkspaceDir,
+		chatWorkspaceLayout,
 		resourceLoader,
+	};
+}
+
+function buildPromptToolNames(
+	customTools: ToolDefinition[] | undefined
+): string[] {
+	if (!customTools || customTools.length === 0) {
+		return DEFAULT_PROMPT_TOOL_NAMES;
+	}
+
+	return Array.from(
+		new Set([
+			...DEFAULT_PROMPT_TOOL_NAMES,
+			...customTools.map((tool) => tool.name),
+		])
+	);
+}
+
+export async function createPhiAgentSession(
+	chatId: string,
+	phiConfig: PhiConfig,
+	options: CreatePhiAgentSessionOptions = {}
+): Promise<AgentSession> {
+	const context = await resolvePhiSessionContext(chatId, phiConfig);
+
+	const { session } = await createAgentSession({
+		cwd: context.chatWorkspaceDir,
+		agentDir: context.agentDir,
+		authStorage: context.authStorage,
+		modelRegistry: context.modelRegistry,
+		model: context.model,
+		thinkingLevel: context.agentConfig.thinkingLevel,
+		sessionManager:
+			options.sessionManager ??
+			SessionManager.continueRecent(
+				context.chatWorkspaceDir,
+				context.chatWorkspaceLayout.sessionsDir
+			),
+		resourceLoader: context.resourceLoader,
+		customTools: options.customTools,
 	});
 
 	installPhiSystemPrompt({
 		session,
 		assistantName: "Phi",
-		workspacePath: chatWorkspaceDir,
-		skills: resourceLoader.getSkills().skills,
-		memoryFilePath: chatWorkspaceLayout.memoryFilePath,
-		toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+		workspacePath: context.chatWorkspaceDir,
+		skills: context.resourceLoader.getSkills().skills,
+		memoryFilePath: context.chatWorkspaceLayout.memoryFilePath,
+		toolNames: buildPromptToolNames(options.customTools),
 	});
 	return session;
+}
+
+async function createDefaultAgentSession(
+	chatId: string,
+	phiConfig: PhiConfig,
+	dependencies: PhiRuntimeDependencies = {}
+): Promise<AgentSession> {
+	return await createPhiAgentSession(chatId, phiConfig, {
+		customTools: dependencies.getCustomTools?.(chatId) ?? [],
+	});
 }
 
 export class PhiRuntime<
@@ -132,8 +200,9 @@ export class PhiRuntime<
 
 export function createPhiRuntime(
 	phiConfig: PhiConfig,
+	dependencies: PhiRuntimeDependencies = {},
 	sessionFactory: ChatSessionFactory<AgentSession> = (chatId: string) =>
-		createDefaultAgentSession(chatId, phiConfig)
+		createDefaultAgentSession(chatId, phiConfig, dependencies)
 ): PhiRuntime<AgentSession> {
 	return new PhiRuntime<AgentSession>(sessionFactory);
 }

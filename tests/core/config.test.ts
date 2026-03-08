@@ -6,9 +6,11 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	assertUniqueChatWorkspaces,
+	collectTelegramChatServiceConfigs,
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
+	resolveCronChatServiceConfigs,
 	resolveTelegramChatServiceConfigs,
 } from "@phi/core/config";
 
@@ -96,6 +98,19 @@ describe("phi config", () => {
 				token: "token",
 			},
 		]);
+	});
+
+	it("collects telegram routes without failing when none are enabled", () => {
+		expect(
+			collectTelegramChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						workspace: "~/alice",
+						agent: "main",
+					},
+				},
+			})
+		).toEqual([]);
 	});
 
 	it("fails when chats mapping is missing", () => {
@@ -254,6 +269,54 @@ describe("phi config", () => {
 			workspace: "~/phi/workspaces/alice",
 			agentId: "main",
 		});
+	});
+
+	it("resolves chat timezone when configured", () => {
+		expect(
+			resolveChatRuntimeConfig(
+				{
+					chats: {
+						"user-alice": {
+							workspace: "~/phi/workspaces/alice",
+							agent: "main",
+							timezone: "Asia/Shanghai",
+						},
+					},
+				},
+				"user-alice"
+			)
+		).toEqual({
+			chatId: "user-alice",
+			workspace: "~/phi/workspaces/alice",
+			agentId: "main",
+			timezone: "Asia/Shanghai",
+		});
+	});
+
+	it("resolves cron chat configs from enabled chats", () => {
+		expect(
+			resolveCronChatServiceConfigs({
+				chats: {
+					"user-alice": {
+						workspace: "~/phi/workspaces/alice",
+						agent: "main",
+						timezone: "Asia/Shanghai",
+					},
+					"user-disabled": {
+						enabled: false,
+						workspace: "~/phi/workspaces/disabled",
+						agent: "main",
+						timezone: "UTC",
+					},
+				},
+			})
+		).toEqual([
+			{
+				chatId: "user-alice",
+				workspace: "~/phi/workspaces/alice",
+				timezone: "Asia/Shanghai",
+			},
+		]);
 	});
 
 	it("fails when chat runtime config is disabled", () => {

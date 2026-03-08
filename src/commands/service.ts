@@ -1,39 +1,88 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
 import {
+	InMemoryChatExecutor,
+	type ChatExecutor,
+} from "@phi/core/chat-executor";
+import {
+	collectTelegramChatServiceConfigs,
+	resolveCronChatServiceConfigs,
+	type PhiConfig,
+	type ResolvedCronChatServiceConfig,
+	type ResolvedTelegramChatServiceConfig,
+} from "@phi/core/config";
+import { ChatReloadRegistry } from "@phi/core/reload";
+import type { ChatSessionRuntime } from "@phi/core/runtime";
+import { startCronService, type RunningCronService } from "@phi/cron/service";
+import {
 	startTelegramPollingBot,
 	type ResolvedTelegramPollingBotConfig,
 	type RunningTelegramPollingBot,
 	type TelegramRouteTarget,
 } from "@phi/services/telegram";
-import {
-	resolveTelegramChatServiceConfigs,
-	type PhiConfig,
-	type ResolvedTelegramChatServiceConfig,
-} from "@phi/core/config";
-import type { ChatSessionRuntime } from "@phi/core/runtime";
+
+interface RunningServicePart {
+	done: Promise<void>;
+	stop(): Promise<void>;
+}
 
 export interface ServiceCommandDependencies {
 	resolveTelegramChats(
 		phiConfig: PhiConfig
 	): ResolvedTelegramChatServiceConfig[];
+	resolveCronChats(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[];
+	createChatExecutor(): ChatExecutor;
+	createReloadRegistry(): ChatReloadRegistry;
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig
+		config: ResolvedTelegramPollingBotConfig,
+		chatExecutor: ChatExecutor
 	): Promise<RunningTelegramPollingBot>;
+	startCronRuntime(
+		runtime: ChatSessionRuntime<AgentSession>,
+		phiConfig: PhiConfig,
+		chatConfigs: ResolvedCronChatServiceConfig[],
+		chatExecutor: ChatExecutor,
+		reloadRegistry: ChatReloadRegistry
+	): Promise<RunningCronService>;
 }
 
 const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	resolveTelegramChats(
 		phiConfig: PhiConfig
 	): ResolvedTelegramChatServiceConfig[] {
-		return resolveTelegramChatServiceConfigs(phiConfig);
+		return collectTelegramChatServiceConfigs(phiConfig);
+	},
+	resolveCronChats(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[] {
+		return resolveCronChatServiceConfigs(phiConfig);
+	},
+	createChatExecutor(): ChatExecutor {
+		return new InMemoryChatExecutor();
+	},
+	createReloadRegistry(): ChatReloadRegistry {
+		return new ChatReloadRegistry();
 	},
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig
+		config: ResolvedTelegramPollingBotConfig,
+		chatExecutor: ChatExecutor
 	): Promise<RunningTelegramPollingBot> {
-		return startTelegramPollingBot(runtime, config);
+		return startTelegramPollingBot(runtime, config, chatExecutor);
+	},
+	startCronRuntime(
+		runtime: ChatSessionRuntime<AgentSession>,
+		phiConfig: PhiConfig,
+		chatConfigs: ResolvedCronChatServiceConfig[],
+		chatExecutor: ChatExecutor,
+		reloadRegistry: ChatReloadRegistry
+	): Promise<RunningCronService> {
+		return startCronService({
+			runtime,
+			phiConfig,
+			chatConfigs,
+			chatExecutor,
+			reloadRegistry,
+		});
 	},
 };
 
@@ -69,10 +118,10 @@ function buildTelegramBotConfigs(
 	}));
 }
 
-async function stopAllBots(bots: RunningTelegramPollingBot[]): Promise<void> {
+async function stopAllServices(services: RunningServicePart[]): Promise<void> {
 	await Promise.allSettled(
-		bots.map(async (bot) => {
-			await bot.stop();
+		services.map(async (service) => {
+			await service.stop();
 		})
 	);
 }
@@ -95,23 +144,40 @@ async function printSystemPromptDebugOutput(
 export async function runServiceCommand(
 	runtime: ChatSessionRuntime<AgentSession>,
 	phiConfig: PhiConfig,
-	dependencies: ServiceCommandDependencies = defaultServiceCommandDependencies
+	dependencies: Partial<ServiceCommandDependencies> = {}
 ): Promise<void> {
-	const telegramChats = dependencies.resolveTelegramChats(phiConfig);
+	const resolvedDependencies: ServiceCommandDependencies = {
+		...defaultServiceCommandDependencies,
+		...dependencies,
+	};
+	const telegramChats = resolvedDependencies.resolveTelegramChats(phiConfig);
+	const cronChats = resolvedDependencies.resolveCronChats(phiConfig);
+	const chatExecutor = resolvedDependencies.createChatExecutor();
+	const reloadRegistry = resolvedDependencies.createReloadRegistry();
 	await printSystemPromptDebugOutput(runtime, telegramChats);
 	const telegramBotConfigs = buildTelegramBotConfigs(telegramChats);
 
-	const runningBots: RunningTelegramPollingBot[] = [];
+	const runningServices: RunningServicePart[] = [];
 	try {
+		const cronRuntime = await resolvedDependencies.startCronRuntime(
+			runtime,
+			phiConfig,
+			cronChats,
+			chatExecutor,
+			reloadRegistry
+		);
+		runningServices.push(cronRuntime);
+
 		for (const botConfig of telegramBotConfigs) {
-			const runningBot = await dependencies.startTelegramBot(
+			const runningBot = await resolvedDependencies.startTelegramBot(
 				runtime,
-				botConfig
+				botConfig,
+				chatExecutor
 			);
-			runningBots.push(runningBot);
+			runningServices.push(runningBot);
 		}
 	} catch (error: unknown) {
-		await stopAllBots(runningBots);
+		await stopAllServices(runningServices);
 		throw error;
 	}
 
@@ -121,7 +187,7 @@ export async function runServiceCommand(
 			return;
 		}
 		stopping = true;
-		await stopAllBots(runningBots);
+		await stopAllServices(runningServices);
 	};
 
 	const stopHandler = (): void => {
@@ -132,7 +198,7 @@ export async function runServiceCommand(
 	process.once("SIGTERM", stopHandler);
 
 	try {
-		await Promise.all(runningBots.map((bot) => bot.done));
+		await Promise.all(runningServices.map((service) => service.done));
 	} finally {
 		process.off("SIGINT", stopHandler);
 		process.off("SIGTERM", stopHandler);

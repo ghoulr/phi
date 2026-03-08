@@ -35,6 +35,7 @@ export interface PhiChatConfig {
 	enabled?: boolean;
 	workspace: string;
 	agent: string;
+	timezone?: string;
 	routes?: PhiChatRoutesConfig;
 }
 
@@ -50,6 +51,12 @@ export interface ResolvedTelegramChatServiceConfig {
 	token: string;
 }
 
+export interface ResolvedCronChatServiceConfig {
+	chatId: string;
+	workspace: string;
+	timezone?: string;
+}
+
 export interface ResolvedAgentRuntimeConfig {
 	agentId: string;
 	provider: string;
@@ -61,6 +68,7 @@ export interface ResolvedChatRuntimeConfig {
 	chatId: string;
 	workspace: string;
 	agentId: string;
+	timezone?: string;
 }
 
 const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
@@ -101,7 +109,7 @@ function resolveChatRuntimeConfigFromEntry(
 		throw new Error(`Chat is disabled in phi config: ${chatId}`);
 	}
 
-	return {
+	const resolvedChat: ResolvedChatRuntimeConfig = {
 		chatId,
 		workspace: toNonEmptyString(
 			chatConfig.workspace,
@@ -112,6 +120,13 @@ function resolveChatRuntimeConfigFromEntry(
 			`Invalid chat configuration for ${chatId}: missing agent`
 		),
 	};
+	if (
+		typeof chatConfig.timezone === "string" &&
+		chatConfig.timezone.length > 0
+	) {
+		resolvedChat.timezone = chatConfig.timezone;
+	}
+	return resolvedChat;
 }
 
 export function getDefaultPhiConfigFilePath(
@@ -221,6 +236,73 @@ export function resolveTelegramChatServiceConfigs(
 	}
 
 	return entries;
+}
+
+export function collectTelegramChatServiceConfigs(
+	phiConfig: PhiConfig
+): ResolvedTelegramChatServiceConfig[] {
+	assertUniqueChatWorkspaces(phiConfig);
+
+	const chats = phiConfig.chats;
+	if (!chats) {
+		throw new Error("Missing chats configuration in phi config.");
+	}
+
+	const entries: ResolvedTelegramChatServiceConfig[] = [];
+	for (const [chatId, chatConfig] of Object.entries(chats)) {
+		if (chatConfig.enabled === false) {
+			continue;
+		}
+
+		const telegramRoute = chatConfig.routes?.telegram;
+		if (!telegramRoute || telegramRoute.enabled === false) {
+			continue;
+		}
+
+		const resolvedChat = resolveChatRuntimeConfigFromEntry(
+			chatId,
+			chatConfig
+		);
+		entries.push({
+			chatId,
+			workspace: resolvedChat.workspace,
+			telegramChatId: toTelegramChatId(
+				telegramRoute.id,
+				`Invalid telegram route for chat ${chatId}: missing id`
+			),
+			token: toNonEmptyString(
+				telegramRoute.token,
+				`Invalid telegram route for chat ${chatId}: missing token`
+			),
+		});
+	}
+
+	return entries;
+}
+
+export function resolveCronChatServiceConfigs(
+	phiConfig: PhiConfig
+): ResolvedCronChatServiceConfig[] {
+	assertUniqueChatWorkspaces(phiConfig);
+
+	const chats = phiConfig.chats;
+	if (!chats) {
+		throw new Error("Missing chats configuration in phi config.");
+	}
+
+	return Object.entries(chats)
+		.filter(([, chatConfig]) => chatConfig.enabled !== false)
+		.map(([chatId, chatConfig]) => {
+			const resolvedChat = resolveChatRuntimeConfigFromEntry(
+				chatId,
+				chatConfig
+			);
+			return {
+				chatId: resolvedChat.chatId,
+				workspace: resolvedChat.workspace,
+				timezone: resolvedChat.timezone,
+			};
+		});
 }
 
 export function resolveChatRuntimeConfig(
