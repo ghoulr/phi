@@ -11,7 +11,6 @@ import {
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
 	resolveCronChatServiceConfigs,
-	resolveTelegramChatServiceConfigs,
 } from "@phi/core/config";
 
 describe("phi config", () => {
@@ -21,7 +20,7 @@ describe("phi config", () => {
 		).toThrow("Missing phi config file");
 	});
 
-	it("resolves telegram routes from chats", () => {
+	it("collects telegram routes from chats", () => {
 		const directory = mkdtempSync(join(tmpdir(), "phi-config-"));
 		const configPath = join(directory, "phi.yaml");
 
@@ -46,7 +45,7 @@ describe("phi config", () => {
 			);
 
 			const config = loadPhiConfig(configPath);
-			expect(resolveTelegramChatServiceConfigs(config)).toEqual([
+			expect(collectTelegramChatServiceConfigs(config)).toEqual([
 				{
 					chatId: "user-alice",
 					workspace: "~/phi/workspaces/alice",
@@ -59,21 +58,10 @@ describe("phi config", () => {
 		}
 	});
 
-	it("skips disabled chat and chat without telegram route", () => {
+	it("skips chats without telegram route", () => {
 		expect(
-			resolveTelegramChatServiceConfigs({
+			collectTelegramChatServiceConfigs({
 				chats: {
-					"user-disabled": {
-						enabled: false,
-						workspace: "~/disabled",
-						agent: "main",
-						routes: {
-							telegram: {
-								id: "1001",
-								token: "token",
-							},
-						},
-					},
 					"user-no-telegram": {
 						workspace: "~/no-telegram",
 						agent: "main",
@@ -114,14 +102,14 @@ describe("phi config", () => {
 	});
 
 	it("fails when chats mapping is missing", () => {
-		expect(() => resolveTelegramChatServiceConfigs({})).toThrow(
+		expect(() => collectTelegramChatServiceConfigs({})).toThrow(
 			"Missing chats configuration in phi config."
 		);
 	});
 
 	it("fails when telegram route token is missing", () => {
 		expect(() =>
-			resolveTelegramChatServiceConfigs({
+			collectTelegramChatServiceConfigs({
 				chats: {
 					"user-alice": {
 						workspace: "~/alice",
@@ -140,7 +128,7 @@ describe("phi config", () => {
 
 	it("fails when chat workspace is missing", () => {
 		expect(() =>
-			resolveTelegramChatServiceConfigs({
+			collectTelegramChatServiceConfigs({
 				chats: {
 					"user-alice": {
 						workspace: "",
@@ -157,26 +145,6 @@ describe("phi config", () => {
 		).toThrow(
 			"Invalid chat configuration for user-alice: missing workspace"
 		);
-	});
-
-	it("fails when there is no enabled telegram route", () => {
-		expect(() =>
-			resolveTelegramChatServiceConfigs({
-				chats: {
-					"user-alice": {
-						enabled: false,
-						workspace: "~/alice",
-						agent: "main",
-						routes: {
-							telegram: {
-								id: "1001",
-								token: "token",
-							},
-						},
-					},
-				},
-			})
-		).toThrow("No enabled telegram routes found in chats configuration.");
 	});
 
 	it("fails when enabled chats resolve to the same workspace", () => {
@@ -201,30 +169,9 @@ describe("phi config", () => {
 		);
 	});
 
-	it("ignores disabled chats when checking unique workspaces", () => {
+	it("fails collecting telegram routes when workspaces collide", () => {
 		expect(() =>
-			assertUniqueChatWorkspaces(
-				{
-					chats: {
-						"user-alice": {
-							workspace: "~/phi/shared",
-							agent: "main",
-						},
-						"user-bob": {
-							enabled: false,
-							workspace: "~/phi/shared",
-							agent: "support",
-						},
-					},
-				},
-				"/home/tester"
-			)
-		).not.toThrow();
-	});
-
-	it("fails resolving telegram routes when workspaces collide", () => {
-		expect(() =>
-			resolveTelegramChatServiceConfigs({
+			collectTelegramChatServiceConfigs({
 				chats: {
 					"user-alice": {
 						workspace: "~/phi/shared",
@@ -271,42 +218,17 @@ describe("phi config", () => {
 		});
 	});
 
-	it("resolves chat timezone when configured", () => {
-		expect(
-			resolveChatRuntimeConfig(
-				{
-					chats: {
-						"user-alice": {
-							workspace: "~/phi/workspaces/alice",
-							agent: "main",
-							timezone: "Asia/Shanghai",
-						},
-					},
-				},
-				"user-alice"
-			)
-		).toEqual({
-			chatId: "user-alice",
-			workspace: "~/phi/workspaces/alice",
-			agentId: "main",
-			timezone: "Asia/Shanghai",
-		});
-	});
-
-	it("resolves cron chat configs from enabled chats", () => {
+	it("resolves cron chat configs", () => {
 		expect(
 			resolveCronChatServiceConfigs({
 				chats: {
 					"user-alice": {
 						workspace: "~/phi/workspaces/alice",
 						agent: "main",
-						timezone: "Asia/Shanghai",
 					},
-					"user-disabled": {
-						enabled: false,
-						workspace: "~/phi/workspaces/disabled",
-						agent: "main",
-						timezone: "UTC",
+					"user-bob": {
+						workspace: "~/phi/workspaces/bob",
+						agent: "support",
 					},
 				},
 			})
@@ -314,26 +236,12 @@ describe("phi config", () => {
 			{
 				chatId: "user-alice",
 				workspace: "~/phi/workspaces/alice",
-				timezone: "Asia/Shanghai",
+			},
+			{
+				chatId: "user-bob",
+				workspace: "~/phi/workspaces/bob",
 			},
 		]);
-	});
-
-	it("fails when chat runtime config is disabled", () => {
-		expect(() =>
-			resolveChatRuntimeConfig(
-				{
-					chats: {
-						"user-alice": {
-							enabled: false,
-							workspace: "~/phi/workspaces/alice",
-							agent: "main",
-						},
-					},
-				},
-				"user-alice"
-			)
-		).toThrow("Chat is disabled in phi config: user-alice");
 	});
 
 	it("fails resolving chat runtime config when workspaces collide", () => {

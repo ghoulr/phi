@@ -1,74 +1,62 @@
 # ARCHITECT: phi
 
 phi is a chat runtime built on top of pi.
-It routes external messages to chat-scoped pi sessions and keeps phi-owned behavior around them.
+It routes messages from external services into chat-scoped pi sessions.
 
 ## Principles
 
 - Keep it simple.
 - Fail fast.
 - No backward compatibility.
-- Reuse pi where possible, but let phi own chat behavior.
+- Reuse pi as possible.
 
-## Model
+## Chat model
 
-There is one chat model in phi.
+A chat has four dimensions:
 
-A chat has:
+| Dimension | Service chat | TUI chat |
+|-----------|-------------|----------|
+| route | external (e.g. Telegram) | terminal |
+| state root | `<workspace>/.phi` | `~/.phi/pi` |
+| working context | configured workspace | current `cwd` |
+| behavior | phi-owned | phi-owned |
 
-- a route
-- a state root
-- a working context
-- phi-owned behavior
-
-### Service chat
-
-- route: external service route
-- state root: `<workspace>/.phi`
-- working context: configured workspace
-- behavior: phi-owned
-
-Example chat config:
+### Service chat config
 
 ```yaml
 chats:
   alice:
     workspace: ~/phi/workspaces/alice
     agent: main
-    timezone: Asia/Shanghai
 ```
 
-Global chat-level settings such as timezone belong here.
-Other documents may assume this config shape.
+This lives in `~/.phi/phi.yaml` and is **operator-owned**.
+Agents do not modify it.
 
-### TUI chat
+Chat-local settings such as timezone live in the workspace config.
 
-- route: `terminal`
-- state root: `~/.phi/pi`
-- working context: current `cwd`
-- behavior: phi-owned
+### Workspace config
 
-The TUI `cwd` is only working context.
-It is not the phi state root.
+Each workspace has its own agent-owned config:
+
+- `<workspace>/.phi/config.yaml` — active config
+- `<workspace>/.phi/config.template.yaml` — reference template with all options
+
+The agent edits these with normal file tools and calls `reload` to apply.
 
 ## Runtime shape
 
 ```text
-Service -> Runtime -> Chat -> pi session
+Service → Runtime → Chat → pi session
 ```
-
-- **Service** handles transport such as Telegram.
-- **Runtime** resolves chat config, workspace, and pi resources.
-- **Chat** is the resource container.
-- **pi session** executes the actual conversation.
 
 ## Storage
 
-### Global phi home
+### Global
 
 ```text
 ~/.phi/
-├─ phi.yaml
+├─ phi.yaml              # operator config
 ├─ pi/
 │  ├─ sessions/
 │  ├─ memory/
@@ -84,6 +72,8 @@ Service -> Runtime -> Chat -> pi session
 ```text
 <workspace>/
 └─ .phi/
+   ├─ config.yaml            # agent-owned config
+   ├─ config.template.yaml   # reference template
    ├─ sessions/
    ├─ skills/
    ├─ memory/
@@ -94,68 +84,40 @@ Service -> Runtime -> Chat -> pi session
       └─ jobs/
 ```
 
+`config.yaml` stores workspace config, including chat-local settings and cron metadata.
+
 ## Memory
 
-phi keeps memory file-based and simple.
+- `MEMORY.md` — small durable memory, injected into system prompt.
+- `YYYY-MM-DD.md` — daily notes, not auto-injected.
 
-- `MEMORY.md`: small durable memory injected into the system prompt
-- `YYYY-MM-DD.md`: daily working notes, not auto-injected
-
-Before session switch and compaction, phi runs an invisible maintenance turn.
-That turn may update daily memory files, but it is not kept in the normal conversation history.
-Observability is kept through session custom entries.
+Before session switch and compaction, phi runs an invisible maintenance turn to update memory files.
 
 ## Extensions
 
-phi keeps pi-specific behavior in extension modules.
+- `src/extensions/system-prompt/` — prompt builder
+- `src/extensions/memory-maintenance/` — memory maintenance
+- `src/core/` — runtime infrastructure
 
-Current extension modules:
+## Cron
 
-- `src/extensions/system-prompt/`
-- `src/extensions/memory-maintenance/`
-
-`src/core/` keeps runtime infrastructure and shared helpers.
-
-## Cron and background tasks
-
-phi has a chat-scoped cron system.
-
-Cron has two runtime paths:
-
-- normal chat execution
-- isolated cron execution
-
-Runtime shape:
+Chat-scoped cron system. Details in `docs/concepts/cron.md`.
+Cron config lives in `<workspace>/.phi/config.yaml`.
 
 ```text
-Service -> Runtime -> ChatExecutor -> pi session
-Cron -> CronExecutor
-Cron publish ----^
+Service → Runtime → ChatExecutor → pi session
+Cron → CronExecutor
+              ^
+Cron publish ─|
 ```
 
-This means:
+Job state lives under the chat workspace, not in global state.
 
-- external messages use the normal chat execution path
-- cron jobs run outside the main session
-- cron results are published back through the chat execution path
-- chat session mutation stays serialized
+## Reload
 
-Cron remains chat-scoped.
-Job state lives under the chat state root, not in global runtime state.
-If a chat has no cron jobs, cron is effectively off for that chat.
-
-The detailed cron design lives in:
-
-- `docs/concepts/cron.md`
-
-phi should also expose a small chat-scoped reload tool.
-
-That tool is not cron-specific.
-It asks phi to reconcile and reload all phi-owned chat state that can be safely hot-reloaded.
+`reload` is a chat-scoped tool with no parameters.
+It recreates the current session from workspace files.
 
 ## Failure strategy
 
-Fail fast.
-Do not hide errors.
-Do not silently fail.
-When a failure affects user-visible behavior, notify the user.
+Fail fast. Do not hide errors. Notify the user when failures affect visible behavior.

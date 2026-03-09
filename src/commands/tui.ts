@@ -80,6 +80,7 @@ export async function createDefaultTuiSession(
 		skills: resourceLoader.getSkills().skills,
 		memoryFilePath,
 		toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+		includeWorkspaceConfigGuidance: false,
 	});
 	return session;
 }

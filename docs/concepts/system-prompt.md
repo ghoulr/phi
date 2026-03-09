@@ -1,104 +1,67 @@
 # System Prompt
 
-## Scope
+Describes the system prompt used by phi chat sessions.
 
-This document describes the system prompt used by phi chat runtime sessions.
+## Source files
 
-## Source Files
+- Builder: `src/extensions/system-prompt/prompt.ts`
+- Override: `src/extensions/system-prompt/override.ts`
+- Installer: `src/extensions/system-prompt/install.ts`
+- Applied in: `src/core/runtime.ts`, `src/commands/tui.ts`
 
-- Prompt builder: `src/extensions/system-prompt/prompt.ts`
-- Prompt override helper: `src/extensions/system-prompt/override.ts`
-- Prompt installer: `src/extensions/system-prompt/install.ts`
-- Prompt application: `src/core/runtime.ts`, `src/commands/tui.ts`
-
-## Where It Is Applied
-
-- Applied to chat sessions created by runtime (`createDefaultAgentSession`).
-- Applied to TUI sessions created by `src/commands/tui.ts`.
-- Runtime and TUI both use an OpenClaw-style monkey patch to override pi session prompt rebuild behavior.
-
-## Prompt Inputs
+## Prompt inputs
 
 `buildPhiSystemPrompt(...)` receives:
 
-- `assistantName`
-- `workspacePath`
-- `skills`
-- `memoryFilePath`
-- `toolNames`
-- `eventText` (optional)
+| Input | Service chat | TUI chat |
+|-------|-------------|----------|
+| `assistantName` | `"Phi"` | `"Phi"` |
+| `workspacePath` | from `chats.<id>.workspace` | current `cwd` |
+| `skills` | `resourceLoader.getSkills()` | pi-style loading |
+| `memoryFilePath` | `<workspace>/.phi/memory/MEMORY.md` | `~/.phi/pi/memory/MEMORY.md` |
+| `toolNames` | `read`, `bash`, `edit`, `write` + runtime tools (`reload`, `send`) | `read`, `bash`, `edit`, `write` |
+| `eventText` | optional | optional |
 
-Current runtime values:
-
-### Service chat
-
-- `assistantName`: `"Phi"`
-- `toolNames`: `read`, `bash`, `edit`, `write`
-- `workspacePath`: resolved from `chats.<chatId>.workspace` in `~/.phi/phi.yaml`
-- `skills`: from runtime `resourceLoader.getSkills().skills`
-- `memoryFilePath`: `<workspace>/.phi/memory/MEMORY.md`
-- `eventText`: not provided by default
-
-### TUI chat
-
-- `assistantName`: `"Phi"`
-- `toolNames`: `read`, `bash`, `edit`, `write`
-- `workspacePath`: current working directory
-- `skills`: loaded through TUI resource loading
-- `memoryFilePath`: `~/.phi/pi/memory/MEMORY.md`
-- `eventText`: not provided by default
-
-## Prompt Sections
-
-Rendered in this order:
+## Prompt sections
 
 1. Identity line
-2. `## Workspace Layout`
-3. `## Skills` (only when skills text is non-empty)
-4. `## Memory` (always included)
-5. `## Tools`
-6. Tool guidance bullets
-7. `## Message Format`
+2. `## Workspace`
+3. `## Skills` (when non-empty)
+4. `## Memory`
+6. `## Tools`
+7. Tool guidance
+8. `## Message Format`
 
-## Message Format Rules
+## Workspace Layout
 
-The system prompt tells the agent:
+Workspace root: `${params.workspacePath}`,
+Use workspace files and directories as the source of truth for persistent context.
 
-- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context
-- it is not user-authored input, it carries metadata for the current message
-- message text is still the actual user input; `system_reminder` only adds metadata
+append text below in service chat:
 
-## Tool Text and Guidance
+Phi config file is `<workspace>/.phi/config.yaml`, read `<workspace>/.phi/config.template.yaml` to learn config details about:
 
-- Tool list is built from `toolNames` with de-duplication (first occurrence kept).
-- Known tool descriptions are defined in `TOOL_DESCRIPTION_MAP`.
-- Additional guidance lines are included conditionally based on enabled tools.
+- timezone
+- cron
 
-## Memory Rules in Prompt
+After config modification, call `reload` for hot-reload.
 
-The memory section now uses stricter write rules.
+See `docs/concepts/workspace-config.md`.
 
-It tells the agent:
+## Message format
 
-- `MEMORY.md` is for durable facts and explicit "remember this" requests
-- when the user asks to remember something, write it to the resolved `MEMORY.md` path for the current chat
-- keep `MEMORY.md` small and concise, and rewrite it when needed
-- `YYYY-MM-DD.md` is for raw daily notes and working context
-- daily notes are not auto-injected; grep and read them on demand
-- current `MEMORY.md` content is appended when non-empty
+User messages end with `<system-reminder>...</system-reminder>`.
+This is metadata, not user input. The agent should not mention it to the user.
 
-## Related Runtime Behavior
+## Memory rules
 
-Memory maintenance before session switch / compaction is implemented separately via transient turns.
-The system prompt only defines the memory rules.
+- `MEMORY.md` — durable facts, injected into prompt. Keep small.
+- `YYYY-MM-DD.md` — daily notes, not injected. Read on demand.
+- Current `MEMORY.md` content is appended to the prompt when non-empty.
 
-phi does not rely on `resourceLoader.systemPromptOverride` for chat runtime prompt ownership.
-Instead, phi owns this as a dedicated extension module: it builds the prompt, applies it to the session, and monkey patches pi's internal base prompt rebuild path so later turns keep using the phi prompt.
+## Runtime behavior
 
-## Configuration Surface
+phi owns the system prompt as a dedicated extension.
+It monkey-patches pi's internal prompt rebuild so the phi prompt persists across turns.
 
-- Prompt text/section logic: edit `src/extensions/system-prompt/prompt.ts`.
-- Prompt installation/override behavior: edit `src/extensions/system-prompt/install.ts` and `src/extensions/system-prompt/override.ts`.
-- Runtime prompt inputs: edit `src/core/runtime.ts` and `src/commands/tui.ts`.
-- Service chat memory content: edit `<workspace>/.phi/memory/MEMORY.md`.
-- TUI memory content: edit `~/.phi/pi/memory/MEMORY.md`.
+Memory maintenance runs as a separate transient turn (see `docs/concepts/transient-turn.md`).

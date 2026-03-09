@@ -6,26 +6,39 @@ export interface ChatReloadResult {
 export type ChatReloadHandler = () => Promise<string[]>;
 
 export class ChatReloadRegistry {
-	private readonly handlers = new Map<string, ChatReloadHandler>();
+	private readonly handlers = new Map<string, Set<ChatReloadHandler>>();
 
 	public register(chatId: string, handler: ChatReloadHandler): () => void {
-		this.handlers.set(chatId, handler);
+		const handlers =
+			this.handlers.get(chatId) ?? new Set<ChatReloadHandler>();
+		handlers.add(handler);
+		this.handlers.set(chatId, handlers);
 		return () => {
-			if (this.handlers.get(chatId) === handler) {
+			const currentHandlers = this.handlers.get(chatId);
+			if (!currentHandlers) {
+				return;
+			}
+			currentHandlers.delete(handler);
+			if (currentHandlers.size === 0) {
 				this.handlers.delete(chatId);
 			}
 		};
 	}
 
 	public async reload(chatId: string): Promise<ChatReloadResult> {
-		const handler = this.handlers.get(chatId);
-		if (!handler) {
+		const handlers = this.handlers.get(chatId);
+		if (!handlers || handlers.size === 0) {
 			throw new Error(`Reload is not available for chat ${chatId}`);
 		}
 
+		const reloaded = (
+			await Promise.all(
+				Array.from(handlers).map(async (handler) => await handler())
+			)
+		).flat();
 		return {
 			chatId,
-			reloaded: await handler(),
+			reloaded,
 		};
 	}
 }

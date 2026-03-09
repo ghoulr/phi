@@ -32,10 +32,8 @@ export interface PhiChatRoutesConfig {
 }
 
 export interface PhiChatConfig {
-	enabled?: boolean;
 	workspace: string;
 	agent: string;
-	timezone?: string;
 	routes?: PhiChatRoutesConfig;
 }
 
@@ -54,7 +52,6 @@ export interface ResolvedTelegramChatServiceConfig {
 export interface ResolvedCronChatServiceConfig {
 	chatId: string;
 	workspace: string;
-	timezone?: string;
 }
 
 export interface ResolvedAgentRuntimeConfig {
@@ -68,7 +65,6 @@ export interface ResolvedChatRuntimeConfig {
 	chatId: string;
 	workspace: string;
 	agentId: string;
-	timezone?: string;
 }
 
 const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
@@ -105,11 +101,7 @@ function resolveChatRuntimeConfigFromEntry(
 	chatId: string,
 	chatConfig: PhiChatConfig
 ): ResolvedChatRuntimeConfig {
-	if (chatConfig.enabled === false) {
-		throw new Error(`Chat is disabled in phi config: ${chatId}`);
-	}
-
-	const resolvedChat: ResolvedChatRuntimeConfig = {
+	return {
 		chatId,
 		workspace: toNonEmptyString(
 			chatConfig.workspace,
@@ -120,13 +112,6 @@ function resolveChatRuntimeConfigFromEntry(
 			`Invalid chat configuration for ${chatId}: missing agent`
 		),
 	};
-	if (
-		typeof chatConfig.timezone === "string" &&
-		chatConfig.timezone.length > 0
-	) {
-		resolvedChat.timezone = chatConfig.timezone;
-	}
-	return resolvedChat;
 }
 
 export function getDefaultPhiConfigFilePath(
@@ -165,10 +150,6 @@ export function assertUniqueChatWorkspaces(
 
 	const workspaceOwners = new Map<string, string>();
 	for (const [chatId, chatConfig] of Object.entries(chats)) {
-		if (chatConfig.enabled === false) {
-			continue;
-		}
-
 		const resolvedChat = resolveChatRuntimeConfigFromEntry(
 			chatId,
 			chatConfig
@@ -187,57 +168,6 @@ export function assertUniqueChatWorkspaces(
 	}
 }
 
-export function resolveTelegramChatServiceConfigs(
-	phiConfig: PhiConfig
-): ResolvedTelegramChatServiceConfig[] {
-	assertUniqueChatWorkspaces(phiConfig);
-
-	const chats = phiConfig.chats;
-	if (!chats) {
-		throw new Error("Missing chats configuration in phi config.");
-	}
-
-	const entries: ResolvedTelegramChatServiceConfig[] = [];
-	for (const [chatId, chatConfig] of Object.entries(chats)) {
-		if (chatConfig.enabled === false) {
-			continue;
-		}
-
-		const telegramRoute = chatConfig.routes?.telegram;
-		if (!telegramRoute || telegramRoute.enabled === false) {
-			continue;
-		}
-
-		const resolvedChat = resolveChatRuntimeConfigFromEntry(
-			chatId,
-			chatConfig
-		);
-		const telegramChatId = toTelegramChatId(
-			telegramRoute.id,
-			`Invalid telegram route for chat ${chatId}: missing id`
-		);
-		const token = toNonEmptyString(
-			telegramRoute.token,
-			`Invalid telegram route for chat ${chatId}: missing token`
-		);
-
-		entries.push({
-			chatId,
-			workspace: resolvedChat.workspace,
-			telegramChatId,
-			token,
-		});
-	}
-
-	if (entries.length === 0) {
-		throw new Error(
-			"No enabled telegram routes found in chats configuration."
-		);
-	}
-
-	return entries;
-}
-
 export function collectTelegramChatServiceConfigs(
 	phiConfig: PhiConfig
 ): ResolvedTelegramChatServiceConfig[] {
@@ -250,10 +180,6 @@ export function collectTelegramChatServiceConfigs(
 
 	const entries: ResolvedTelegramChatServiceConfig[] = [];
 	for (const [chatId, chatConfig] of Object.entries(chats)) {
-		if (chatConfig.enabled === false) {
-			continue;
-		}
-
 		const telegramRoute = chatConfig.routes?.telegram;
 		if (!telegramRoute || telegramRoute.enabled === false) {
 			continue;
@@ -290,19 +216,16 @@ export function resolveCronChatServiceConfigs(
 		throw new Error("Missing chats configuration in phi config.");
 	}
 
-	return Object.entries(chats)
-		.filter(([, chatConfig]) => chatConfig.enabled !== false)
-		.map(([chatId, chatConfig]) => {
-			const resolvedChat = resolveChatRuntimeConfigFromEntry(
-				chatId,
-				chatConfig
-			);
-			return {
-				chatId: resolvedChat.chatId,
-				workspace: resolvedChat.workspace,
-				timezone: resolvedChat.timezone,
-			};
-		});
+	return Object.entries(chats).map(([chatId, chatConfig]) => {
+		const resolvedChat = resolveChatRuntimeConfigFromEntry(
+			chatId,
+			chatConfig
+		);
+		return {
+			chatId: resolvedChat.chatId,
+			workspace: resolvedChat.workspace,
+		};
+	});
 }
 
 export function resolveChatRuntimeConfig(

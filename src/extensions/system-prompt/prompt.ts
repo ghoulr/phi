@@ -14,6 +14,7 @@ export interface BuildPhiSystemPromptParams {
 	memoryFilePath: string;
 	toolNames: string[];
 	eventText?: string;
+	includeWorkspaceConfigGuidance?: boolean;
 }
 
 const DEFAULT_MEMORY_FILE_HEADER = "# MEMORY";
@@ -23,7 +24,7 @@ const TOOL_DESCRIPTION_MAP: Record<string, string> = {
 	bash: "Execute bash commands (ls, rg, find, etc.)",
 	edit: "Make surgical edits to files (exact text replacement)",
 	write: "Create or overwrite files",
-	reload: "Reload phi-owned chat state after file changes",
+	reload: "Recreate the current chat session from workspace files",
 	send: "Send a user-visible message immediately or stage it for turn end",
 	grep: "Search file contents for patterns",
 	find: "Find files by glob pattern",
@@ -60,7 +61,7 @@ const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 	},
 	{
 		id: "bash",
-		line: "Use bash for execution tasks; prefer dedicated tools when an equivalent first-class tool exists.",
+		line: "Use bash for execution tasks; prefer dedicated tools when an equivalent first-class tool exists, use `date` for correct datetime before doing anything about time.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("bash");
 		},
@@ -152,6 +153,30 @@ function appendSection(lines: string[], title: string, body: string): void {
 	lines.push(title, normalized, "");
 }
 
+function buildWorkspaceSection(params: {
+	workspacePath: string;
+	includeWorkspaceConfigGuidance: boolean;
+}): string {
+	const lines = [
+		`Workspace root: ${params.workspacePath}`,
+		"Use workspace files and directories as the source of truth for persistent context.",
+	];
+	if (!params.includeWorkspaceConfigGuidance) {
+		return lines.join("\n\n");
+	}
+	lines.push(
+		"Phi config file is `.phi/config.yaml`, read `.phi/config.template.yaml` to learn config details about:",
+		"",
+		"- timezone",
+		"- cron",
+		"",
+		"After config modification, call `reload` for hot-reload.",
+		"",
+		"See `docs/concepts/workspace-config.md`."
+	);
+	return lines.join("\n");
+}
+
 function buildMessageFormatSection(eventText: string): string {
 	const lines = [
 		"- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context",
@@ -200,13 +225,17 @@ export function buildPhiSystemPrompt(
 	const lines = [
 		`You are ${params.assistantName}, a personal assistant. Be concise.`,
 		"",
-		"## Workspace Layout",
-		`Workspace root: ${params.workspacePath}`,
-		"",
-		"Use workspace files and directories as the source of truth for persistent context.",
-		"",
 	];
 
+	appendSection(
+		lines,
+		"## Workspace",
+		buildWorkspaceSection({
+			workspacePath: params.workspacePath,
+			includeWorkspaceConfigGuidance:
+				params.includeWorkspaceConfigGuidance !== false,
+		})
+	);
 	appendSection(lines, "## Skills", skillsText);
 	appendSection(
 		lines,

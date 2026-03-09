@@ -1,0 +1,30 @@
+# Workspace config template.
+# Copied to <workspace>/.phi/config.template.yaml on first setup.
+# Read this file, then edit config.yaml.
+# Keep only what you need.
+
+version: __PHI_WORKSPACE_CONFIG_VERSION__
+
+chat:
+  # Chat-local timezone.
+  # Used by cron `at` and cron expression evaluation.
+  timezone: Asia/Shanghai
+
+cron:
+  # Turn cron on or off for this workspace.
+  enabled: true
+
+  # Cron job metadata lives here.
+  # Prompt files live under <workspace>/.phi/cron/jobs/.
+  jobs:
+    # Example recurring job.
+    - id: daily-summary
+      enabled: true
+      prompt: jobs/daily-summary.md
+      cron: "0 9 * * 1-5"
+
+    # Example one-shot job.
+    - id: dentist-reminder
+      enabled: true
+      prompt: jobs/dentist-reminder.md
+      at: "2030-01-15 09:00"

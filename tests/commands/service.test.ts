@@ -42,7 +42,6 @@ function createCronChatConfig(
 	return {
 		chatId: "user-alice",
 		workspace: "~/phi/workspaces/alice",
-		timezone: "Asia/Shanghai",
 		...overrides,
 	};
 }

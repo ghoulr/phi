@@ -10,10 +10,6 @@ export interface CronJobDefinition {
 	at?: string;
 }
 
-export interface CronJobsFile {
-	jobs?: CronJobDefinition[];
-}
-
 export interface LoadedCronJob {
 	id: string;
 	enabled: boolean;
@@ -42,6 +38,5 @@ export interface CronReloadResult {
 
 export interface CronRunResult {
 	assistantMessage?: AssistantMessage;
-	assistantText?: string;
 	outboundMessages: PhiMessage[];
 }

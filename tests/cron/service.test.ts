@@ -121,12 +121,17 @@ describe("startCronService", () => {
 			"utf-8"
 		);
 		writeFileSync(
-			layout.cronJobsFilePath,
+			layout.configFilePath,
 			[
-				"jobs:",
-				"  - id: daily",
-				"    prompt: jobs/daily.md",
-				`    at: "${at}"`,
+				"version: 1",
+				"chat:",
+				`  timezone: ${timezone}`,
+				"cron:",
+				"  enabled: true",
+				"  jobs:",
+				"    - id: daily",
+				"      prompt: jobs/daily.md",
+				`      at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);
@@ -148,18 +153,16 @@ describe("startCronService", () => {
 					alice: {
 						workspace,
 						agent: "main",
-						timezone,
 					},
 				},
 			},
-			chatConfigs: [{ chatId: "alice", workspace, timezone }],
+			chatConfigs: [{ chatId: "alice", workspace }],
 			chatExecutor: new InMemoryChatExecutor(),
 			reloadRegistry: new ChatReloadRegistry(),
 			dependencies: {
 				async runJob() {
 					return {
 						assistantMessage: createAssistantMessage("done"),
-						assistantText: "done",
 						outboundMessages: [{ text: "done", attachments: [] }],
 					};
 				},
@@ -173,9 +176,8 @@ describe("startCronService", () => {
 		await service.stop();
 
 		expect(publishCalls).toBe(1);
-		const logContent = readCapturedLogs();
-		expect(logContent).toContain('"event":"cron.run"');
-		expect(logContent).toContain('"status":"ok"');
+		expect(readCapturedLogs()).toContain('"event":"cron.run"');
+		expect(readCapturedLogs()).toContain('"status":"ok"');
 	});
 
 	it("keeps the previous valid state when reload fails", async () => {
@@ -189,12 +191,17 @@ describe("startCronService", () => {
 			"utf-8"
 		);
 		writeFileSync(
-			layout.cronJobsFilePath,
+			layout.configFilePath,
 			[
-				"jobs:",
-				"  - id: daily",
-				"    prompt: jobs/daily.md",
-				`    at: "${at}"`,
+				"version: 1",
+				"chat:",
+				`  timezone: ${timezone}`,
+				"cron:",
+				"  enabled: true",
+				"  jobs:",
+				"    - id: daily",
+				"      prompt: jobs/daily.md",
+				`      at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);
@@ -217,11 +224,10 @@ describe("startCronService", () => {
 					alice: {
 						workspace,
 						agent: "main",
-						timezone,
 					},
 				},
 			},
-			chatConfigs: [{ chatId: "alice", workspace, timezone }],
+			chatConfigs: [{ chatId: "alice", workspace }],
 			chatExecutor: new InMemoryChatExecutor(),
 			reloadRegistry,
 			dependencies: {
@@ -229,7 +235,6 @@ describe("startCronService", () => {
 					runCalls += 1;
 					return {
 						assistantMessage: createAssistantMessage("done"),
-						assistantText: "done",
 						outboundMessages: [{ text: "done", attachments: [] }],
 					};
 				},
@@ -238,12 +243,17 @@ describe("startCronService", () => {
 		});
 
 		writeFileSync(
-			layout.cronJobsFilePath,
+			layout.configFilePath,
 			[
-				"jobs:",
-				"  - id: broken",
-				"    prompt: jobs/missing.md",
-				`    at: "${at}"`,
+				"version: 1",
+				"chat:",
+				`  timezone: ${timezone}`,
+				"cron:",
+				"  enabled: true",
+				"  jobs:",
+				"    - id: broken",
+				"      prompt: jobs/missing.md",
+				`      at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);

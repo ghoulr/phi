@@ -55,6 +55,7 @@ export interface CreatePhiAgentSessionOptions {
 	additionalPromptToolNames?: string[];
 	eventText?: string;
 	messagingState?: PhiMessagingSessionState;
+	printSystemPrompt?: boolean;
 }
 
 export interface PhiRuntimeDependencies {
@@ -183,6 +184,16 @@ function buildPromptToolNames(
 	);
 }
 
+function printInjectedSystemPrompt(systemPrompt: string): void {
+	console.log(
+		[
+			"=== PHI SYSTEM PROMPT START ===",
+			systemPrompt,
+			"=== PHI SYSTEM PROMPT END ===",
+		].join("\n")
+	);
+}
+
 export async function createPhiAgentSession(
 	chatId: string,
 	phiConfig: PhiConfig,
@@ -214,7 +225,7 @@ export async function createPhiAgentSession(
 		customTools: options.customTools,
 	});
 
-	installPhiSystemPrompt({
+	const systemPrompt = installPhiSystemPrompt({
 		session,
 		assistantName: "Phi",
 		workspacePath: context.chatWorkspaceDir,
@@ -226,6 +237,9 @@ export async function createPhiAgentSession(
 		),
 		eventText: options.eventText,
 	});
+	if (options.printSystemPrompt) {
+		printInjectedSystemPrompt(systemPrompt);
+	}
 	if (options.messagingState) {
 		registerPhiMessagingSessionState(session, options.messagingState);
 	}

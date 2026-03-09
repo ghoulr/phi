@@ -21,7 +21,7 @@ const app = tui({
 	runTui: async () => {
 		await runTuiCommand();
 	},
-	runService: async () => {
+	runService: async (options) => {
 		const phiConfig = loadPhiConfig(getDefaultPhiConfigFilePath());
 		const reloadRegistry = new ChatReloadRegistry();
 		const deliveryRegistry = new PhiRouteDeliveryRegistry();
@@ -29,7 +29,6 @@ const app = tui({
 			Object.entries(phiConfig.chats ?? {})
 				.filter(
 					([, chatConfig]) =>
-						chatConfig.enabled !== false &&
 						chatConfig.routes?.telegram &&
 						chatConfig.routes.telegram.enabled !== false
 				)
@@ -43,6 +42,7 @@ const app = tui({
 				if (!routedChatIds.has(chatId)) {
 					return await createPhiAgentSession(chatId, phiConfig, {
 						customTools,
+						printSystemPrompt: options.printSystemPrompt === true,
 					});
 				}
 
@@ -50,6 +50,7 @@ const app = tui({
 				return await createPhiAgentSession(chatId, phiConfig, {
 					customTools,
 					messagingState,
+					printSystemPrompt: options.printSystemPrompt === true,
 					extensionFactories: [
 						createPhiMessagingExtension({
 							state: messagingState,
@@ -65,6 +66,17 @@ const app = tui({
 				});
 			}
 		);
+		for (const chatId of Object.keys(phiConfig.chats ?? {})) {
+			reloadRegistry.register(chatId, async () => {
+				runtime.invalidateSession(chatId);
+				return ["session"];
+			});
+		}
+		if (options.printSystemPrompt === true) {
+			for (const chatId of Object.keys(phiConfig.chats ?? {})) {
+				await runtime.getOrCreateSession(chatId);
+			}
+		}
 		await runServiceCommand(runtime, phiConfig, {
 			createReloadRegistry(): ChatReloadRegistry {
 				return reloadRegistry;

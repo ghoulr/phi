@@ -43,7 +43,7 @@ describe("buildPhiSystemPrompt", () => {
 				)
 			).toBe(true);
 
-			const workspaceIndex = prompt.indexOf("## Workspace Layout");
+			const workspaceIndex = prompt.indexOf("## Workspace");
 			const skillsIndex = prompt.indexOf("## Skills");
 			const memoryIndex = prompt.indexOf("## Memory");
 			const toolsIndex = prompt.indexOf("## Tools");
@@ -79,6 +79,7 @@ describe("buildPhiSystemPrompt", () => {
 			expect(prompt.includes("keep it small and concise")).toBe(true);
 			expect(prompt.includes("grep and read them on demand")).toBe(true);
 			expect(prompt.includes("Current MEMORY.md")).toBe(false);
+			expect(prompt.includes("## Workspace")).toBe(true);
 			expect(prompt.includes("## Tools")).toBe(true);
 			expect(prompt.includes("## Events & Replies")).toBe(false);
 		} finally {
@@ -121,6 +122,60 @@ describe("buildPhiSystemPrompt", () => {
 
 			expect(prompt.includes(filePath)).toBe(true);
 			expect(prompt.includes(join(dir, "YYYY-MM-DD.md"))).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("includes workspace config guidance by default", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["read", "reload"],
+				eventText: "",
+			});
+
+			expect(
+				prompt.includes(
+					"Phi config file is `.phi/config.yaml`, read `.phi/config.template.yaml`"
+				)
+			).toBe(true);
+			expect(prompt.includes("- timezone")).toBe(true);
+			expect(prompt.includes("- cron")).toBe(true);
+			expect(
+				prompt.includes(
+					"After config modification, call `reload` for hot-reload."
+				)
+			).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("can omit workspace config guidance", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["read"],
+				eventText: "",
+				includeWorkspaceConfigGuidance: false,
+			});
+
+			expect(prompt.includes("## Workspace")).toBe(true);
+			expect(prompt.includes("Workspace root: /workspace/alice")).toBe(
+				true
+			);
+			expect(prompt.includes(".phi/config.yaml")).toBe(false);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

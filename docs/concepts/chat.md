@@ -1,83 +1,38 @@
 # Chat
 
-## Definition
+A chat is phi's resource container for one conversation.
 
-A chat is the resource container that phi uses to run one conversation context.
+## Dimensions
 
-A chat has these dimensions:
+| Dimension | Service chat | TUI chat |
+|-----------|-------------|----------|
+| route | external (e.g. Telegram) | terminal |
+| state root | `<workspace>/.phi` | `~/.phi/pi` |
+| working context | configured workspace | current `cwd` |
 
-- route
-- state root
-- working context
-- behavior
+## Service chat
 
-## Service Chat
+A service chat owns:
 
-A service chat is a normal user chat from an external route such as Telegram.
-
-Properties:
-
-- route: external service route
-- state root: `<workspace>/.phi`
-- working context: configured workspace
-- behavior: phi-owned
-
-This means the chat owns its own:
-
+- workspace config (`.phi/config.yaml`)
 - sessions
 - memory
 - skills
 - inbox
-- cron job files
+- cron prompt files
 
-Structured logs are emitted through stdio.
-In production, phi should run behind a collector such as `journald`.
+`config.yaml` holds chat-local settings and cron metadata.
 
-## TUI Chat
+See `docs/concepts/workspace-config.md` for workspace config details.
 
-TUI should also be treated as a chat, but a special one.
+## TUI chat
 
-Properties:
+TUI is a special chat with a global state root at `~/.phi/pi`.
 
-- route: `terminal`
-- state root: `~/.phi/pi`
-- working context: current working directory
-- behavior: phi-owned
-
-Important distinction:
-
-- the current working directory is only the working context
-- it is not the phi state root
-
-So TUI should not treat `<cwd>/.phi` as its phi home.
+The current working directory is only working context, not the phi state root.
+TUI does not use `<cwd>/.phi` as its phi home.
 
 ## Relationship with pi
 
-phi reuses pi runtime infrastructure.
-
-For TUI chat, pi-style state still lives under:
-
-```text
-~/.phi/pi
-```
-
-This includes TUI memory under:
-
-```text
-~/.phi/pi/memory/
-```
-
-But the behavior should still follow phi decisions, such as:
-
-- phi system prompt extension
-- phi memory rules
-- phi memory maintenance extension
-
-## Summary
-
-There are not two unrelated systems.
-
-There is one chat model in phi:
-
-- service chats are workspace-rooted chats
-- TUI is a terminal-routed special chat with a global state root
+phi reuses pi infrastructure.
+TUI state lives under `~/.phi/pi` but follows phi behavior (system prompt, memory rules, maintenance).

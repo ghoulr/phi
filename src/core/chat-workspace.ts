@@ -2,6 +2,11 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+import {
+	createDefaultPhiWorkspaceConfigFileContent,
+	renderPhiWorkspaceConfigTemplate,
+} from "@phi/core/workspace-config";
+
 const DOT_PHI_DIR = ".phi";
 const SESSIONS_DIR = "sessions";
 const MEMORY_DIR = "memory";
@@ -9,13 +14,16 @@ const SKILLS_DIR = "skills";
 const CRON_DIR = "cron";
 const CRON_JOBS_DIR = "jobs";
 const INBOX_DIR = "inbox";
+const CONFIG_FILE_NAME = "config.yaml";
+const CONFIG_TEMPLATE_FILE_NAME = "config.template.yaml";
 const MEMORY_FILE_NAME = "MEMORY.md";
-const CRON_JOBS_FILE_NAME = "jobs.yaml";
 const DEFAULT_MEMORY_FILE_CONTENT = "# MEMORY\n";
 
 export interface ChatWorkspaceLayout {
 	workspaceDir: string;
 	phiDir: string;
+	configFilePath: string;
+	configTemplateFilePath: string;
 	sessionsDir: string;
 	memoryDir: string;
 	skillsDir: string;
@@ -23,7 +31,6 @@ export interface ChatWorkspaceLayout {
 	cronDir: string;
 	cronJobsDir: string;
 	memoryFilePath: string;
-	cronJobsFilePath: string;
 }
 
 export function resolveChatWorkspaceDirectory(
@@ -42,20 +49,8 @@ export function resolveChatWorkspaceDirectory(
 	return resolve(workspace);
 }
 
-export function getChatCronDirectoryPath(workspaceDir: string): string {
-	return join(workspaceDir, DOT_PHI_DIR, CRON_DIR);
-}
-
 export function getChatInboxDirectoryPath(workspaceDir: string): string {
 	return join(workspaceDir, DOT_PHI_DIR, INBOX_DIR);
-}
-
-export function getChatCronJobsDirectoryPath(workspaceDir: string): string {
-	return join(getChatCronDirectoryPath(workspaceDir), CRON_JOBS_DIR);
-}
-
-export function getChatCronJobsFilePath(workspaceDir: string): string {
-	return join(getChatCronDirectoryPath(workspaceDir), CRON_JOBS_FILE_NAME);
 }
 
 export function ensureChatWorkspaceLayout(
@@ -64,6 +59,8 @@ export function ensureChatWorkspaceLayout(
 	mkdirSync(workspaceDir, { recursive: true });
 
 	const phiDir = join(workspaceDir, DOT_PHI_DIR);
+	const configFilePath = join(phiDir, CONFIG_FILE_NAME);
+	const configTemplateFilePath = join(phiDir, CONFIG_TEMPLATE_FILE_NAME);
 	const sessionsDir = join(phiDir, SESSIONS_DIR);
 	const memoryDir = join(phiDir, MEMORY_DIR);
 	const skillsDir = join(phiDir, SKILLS_DIR);
@@ -71,7 +68,6 @@ export function ensureChatWorkspaceLayout(
 	const cronDir = join(phiDir, CRON_DIR);
 	const cronJobsDir = join(cronDir, CRON_JOBS_DIR);
 	const memoryFilePath = join(memoryDir, MEMORY_FILE_NAME);
-	const cronJobsFilePath = join(cronDir, CRON_JOBS_FILE_NAME);
 
 	mkdirSync(sessionsDir, { recursive: true });
 	mkdirSync(memoryDir, { recursive: true });
@@ -80,6 +76,20 @@ export function ensureChatWorkspaceLayout(
 	mkdirSync(cronDir, { recursive: true });
 	mkdirSync(cronJobsDir, { recursive: true });
 
+	if (!existsSync(configFilePath)) {
+		writeFileSync(
+			configFilePath,
+			createDefaultPhiWorkspaceConfigFileContent(),
+			"utf-8"
+		);
+	}
+	if (!existsSync(configTemplateFilePath)) {
+		writeFileSync(
+			configTemplateFilePath,
+			renderPhiWorkspaceConfigTemplate(),
+			"utf-8"
+		);
+	}
 	if (!existsSync(memoryFilePath)) {
 		writeFileSync(memoryFilePath, DEFAULT_MEMORY_FILE_CONTENT, "utf-8");
 	}
@@ -87,6 +97,8 @@ export function ensureChatWorkspaceLayout(
 	return {
 		workspaceDir,
 		phiDir,
+		configFilePath,
+		configTemplateFilePath,
 		sessionsDir,
 		memoryDir,
 		skillsDir,
@@ -94,6 +106,5 @@ export function ensureChatWorkspaceLayout(
 		cronDir,
 		cronJobsDir,
 		memoryFilePath,
-		cronJobsFilePath,
 	};
 }

@@ -18,7 +18,8 @@
     "lint-staged": "lint-staged",
     "check": "biome format --write . && biome lint . && tsgo --noEmit",
     "test:agent": "AGENT=1 bun test --bail",
-    "dev:service": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service"
+    "dev:service": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service",
+    "dev:service:prompt": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service --print-system-prompt"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "0.55.4",

@@ -10,12 +10,16 @@ import {
 	ensureChatWorkspaceLayout,
 	resolveChatWorkspaceDirectory,
 } from "@phi/core/chat-workspace";
-import { getPhiLogger } from "@phi/core/logger";
 import type {
 	PhiConfig,
 	ResolvedCronChatServiceConfig,
 } from "@phi/core/config";
+import { getPhiLogger } from "@phi/core/logger";
 import type { ChatReloadRegistry } from "@phi/core/reload";
+import {
+	loadPhiWorkspaceConfig,
+	resolveWorkspaceTimezone,
+} from "@phi/core/workspace-config";
 import {
 	createPhiAgentSession,
 	type ChatSessionRuntime,
@@ -180,7 +184,6 @@ function createDefaultCronServiceDependencies(
 						getLastAssistantMessage(session),
 						visibleText
 					),
-					assistantText: visibleText,
 					outboundMessages,
 				};
 			} finally {
@@ -248,6 +251,7 @@ function createAssistantErrorMessage(
 class ChatCronScheduler {
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private jobs: LoadedCronJob[] = [];
+	private timezone: string | undefined;
 	private readonly runningJobs = new Set<string>();
 
 	public constructor(
@@ -283,6 +287,7 @@ class ChatCronScheduler {
 	public async reload(): Promise<CronReloadResult> {
 		const previousJobs = this.jobs;
 		const previousTimer = this.timer;
+		const previousTimezone = this.timezone;
 		log.debug("cron.scheduler.reload_started", {
 			chatId: this.chatConfig.chatId,
 		});
@@ -292,12 +297,23 @@ class ChatCronScheduler {
 				this.chatConfig.workspace
 			);
 			const layout = ensureChatWorkspaceLayout(workspaceDir);
-			const loadedJobs = loadCronJobs({ layout });
-			if (loadedJobs.length > 0 && !this.chatConfig.timezone) {
+			const workspaceConfig = loadPhiWorkspaceConfig(
+				layout.configFilePath
+			);
+			const timezone = resolveWorkspaceTimezone(
+				workspaceConfig,
+				layout.configFilePath
+			);
+			const loadedJobs = loadCronJobs({
+				layout,
+				workspaceConfig,
+			});
+			if (loadedJobs.length > 0 && !timezone) {
 				throw new Error(
-					`Missing timezone for cron chat ${this.chatConfig.chatId}`
+					`Missing chat.timezone for cron chat ${this.chatConfig.chatId}`
 				);
 			}
+			this.timezone = timezone;
 			const scheduledJobs = loadedJobs.map((job) => ({
 				...job,
 				nextRunAtMs: this.computeNextRunAtMs(job),
@@ -329,6 +345,7 @@ class ChatCronScheduler {
 		} catch (error: unknown) {
 			this.jobs = previousJobs;
 			this.timer = previousTimer;
+			this.timezone = previousTimezone;
 			log.error("cron.scheduler.reload_failed", {
 				chatId: this.chatConfig.chatId,
 				err: error instanceof Error ? error : new Error(String(error)),
@@ -338,10 +355,10 @@ class ChatCronScheduler {
 	}
 
 	private getTimezone(): string {
-		if (!this.chatConfig.timezone) {
+		if (!this.timezone) {
 			return Intl.DateTimeFormat().resolvedOptions().timeZone;
 		}
-		return this.chatConfig.timezone;
+		return this.timezone;
 	}
 
 	private computeNextRunAtMs(job: LoadedCronJob): number | undefined {

@@ -1,16 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
-import { parse } from "yaml";
-
 import { appendStructuredLogEntry } from "@phi/core/logger";
+import {
+	resolveWorkspaceCronJobDefinitions,
+	type PhiWorkspaceConfig,
+} from "@phi/core/workspace-config";
 import type { ChatWorkspaceLayout } from "@phi/core/chat-workspace";
-import type {
-	CronJobDefinition,
-	CronJobsFile,
-	CronRunLogEntry,
-	LoadedCronJob,
-} from "@phi/cron/types";
+import type { CronRunLogEntry, LoadedCronJob } from "@phi/cron/types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -21,36 +18,6 @@ function toNonEmptyString(value: unknown, errorMessage: string): string {
 		throw new Error(errorMessage);
 	}
 	return value.trim();
-}
-
-function parseJobsFile(filePath: string): CronJobsFile {
-	if (!existsSync(filePath)) {
-		return { jobs: [] };
-	}
-
-	const raw = parse(readFileSync(filePath, "utf-8"));
-	if (raw === undefined || raw === null) {
-		return { jobs: [] };
-	}
-	if (!isRecord(raw)) {
-		throw new Error(
-			`Invalid cron jobs file: root must be a mapping (${filePath})`
-		);
-	}
-
-	const jobs = raw.jobs;
-	if (jobs === undefined) {
-		return { jobs: [] };
-	}
-	if (!Array.isArray(jobs)) {
-		throw new Error(
-			`Invalid cron jobs file: jobs must be a list (${filePath})`
-		);
-	}
-
-	return {
-		jobs: jobs as CronJobDefinition[],
-	};
 }
 
 function resolvePromptFilePath(
@@ -71,9 +38,12 @@ function resolvePromptFilePath(
 
 export function loadCronJobs(params: {
 	layout: ChatWorkspaceLayout;
+	workspaceConfig: PhiWorkspaceConfig;
 }): LoadedCronJob[] {
-	const parsed = parseJobsFile(params.layout.cronJobsFilePath);
-	const jobs = parsed.jobs ?? [];
+	const jobs = resolveWorkspaceCronJobDefinitions(
+		params.workspaceConfig,
+		params.layout.configFilePath
+	);
 	const loadedJobs: LoadedCronJob[] = [];
 	const seenIds = new Set<string>();
 

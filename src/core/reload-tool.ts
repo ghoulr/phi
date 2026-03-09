@@ -11,7 +11,7 @@ export function createReloadTool(
 		name: "reload",
 		label: "Reload",
 		description:
-			"Reload all hot-reloadable phi state for the current chat after config or file changes.",
+			"Recreate the current phi chat session from workspace files after config or file changes.",
 		parameters: Type.Object({}),
 		execute: async () => {
 			const result = await reloadRegistry.reload(chatId);

@@ -22,6 +22,8 @@ describe("ensureChatWorkspaceLayout", () => {
 
 			expect(layout.workspaceDir).toBe(workspaceDir);
 			expect(existsSync(layout.phiDir)).toBe(true);
+			expect(existsSync(layout.configFilePath)).toBe(true);
+			expect(existsSync(layout.configTemplateFilePath)).toBe(true);
 			expect(existsSync(layout.sessionsDir)).toBe(true);
 			expect(existsSync(layout.memoryDir)).toBe(true);
 			expect(existsSync(layout.skillsDir)).toBe(true);
@@ -34,22 +36,30 @@ describe("ensureChatWorkspaceLayout", () => {
 		}
 	});
 
-	it("initializes MEMORY.md once and keeps existing content", () => {
+	it("initializes config and memory files once and keeps existing content", () => {
 		const root = mkdtempSync(join(tmpdir(), "phi-chat-workspace-"));
 		const workspaceDir = join(root, "bob");
 
 		try {
 			const first = ensureChatWorkspaceLayout(workspaceDir);
+			expect(readFileSync(first.configFilePath, "utf-8")).toBe(
+				"version: 1\n"
+			);
 			expect(readFileSync(first.memoryFilePath, "utf-8")).toBe(
 				"# MEMORY\n"
 			);
 
-			const customContent = "# MEMORY\ncustom notes\n";
-			writeFileSync(first.memoryFilePath, customContent, "utf-8");
+			const customConfig = "version: 1\nchat:\n  timezone: UTC\n";
+			const customMemory = "# MEMORY\ncustom notes\n";
+			writeFileSync(first.configFilePath, customConfig, "utf-8");
+			writeFileSync(first.memoryFilePath, customMemory, "utf-8");
 
 			const second = ensureChatWorkspaceLayout(workspaceDir);
+			expect(readFileSync(second.configFilePath, "utf-8")).toBe(
+				customConfig
+			);
 			expect(readFileSync(second.memoryFilePath, "utf-8")).toBe(
-				customContent
+				customMemory
 			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
