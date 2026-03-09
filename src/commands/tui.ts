@@ -17,6 +17,10 @@ import {
 	getPhiSharedAuthFilePath,
 } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
+import {
+	createPhiSkillsOverride,
+	resolvePhiGlobalSkillPaths,
+} from "@phi/core/skills";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 
@@ -51,9 +55,15 @@ export async function createDefaultTuiSession(
 		authStorage,
 		join(agentDir, "models.json")
 	);
+	const skillPaths = resolvePhiGlobalSkillPaths(userHomeDir);
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
+		noSkills: true,
+		additionalSkillPaths: skillPaths,
+		skillsOverride: createPhiSkillsOverride({
+			roots: skillPaths,
+		}),
 		extensionFactories: [
 			createPhiMemoryMaintenanceExtension({
 				memoryFilePath,

@@ -1,16 +1,37 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "bun:test";
 
+import type { ResourceDiagnostic, Skill } from "@mariozechner/pi-coding-agent";
+
 import {
+	createPhiSkillsOverride,
 	getChatScopedSkillsDir,
 	getPhiGlobalSkillsDir,
+	limitSkillsForPrompt,
 	resolveChatScopedSkillPaths,
 	resolvePhiGlobalSkillPaths,
 	resolvePhiSkillPaths,
 } from "@phi/core/skills";
+
+function createSkill(path: string): Skill {
+	return {
+		name: path.split("/").at(-2) ?? "skill",
+		description: "test skill",
+		filePath: path,
+		baseDir: path.slice(0, path.lastIndexOf("/")),
+		source: "path",
+		disableModelInvocation: false,
+	};
+}
 
 describe("phi skills", () => {
 	it("resolves global skills directory under ~/.phi/pi/skills", () => {
@@ -127,5 +148,92 @@ describe("phi skills", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+
+	it("skips skills that resolve outside the configured roots", () => {
+		const root = mkdtempSync(join(tmpdir(), "phi-skills-"));
+		const allowedRoot = join(root, "allowed");
+		const outsideRoot = join(root, "outside");
+		const linkedRoot = join(root, "linked");
+		const outsideSkillDir = join(outsideRoot, "escape-skill");
+		const outsideSkillFilePath = join(outsideSkillDir, "SKILL.md");
+
+		try {
+			mkdirSync(outsideSkillDir, { recursive: true });
+			mkdirSync(allowedRoot, { recursive: true });
+			writeFileSync(outsideSkillFilePath, "# skill\n", "utf-8");
+			symlinkSync(outsideSkillDir, linkedRoot, "dir");
+
+			const override = createPhiSkillsOverride({ roots: [allowedRoot] });
+			const result = override({
+				skills: [createSkill(join(linkedRoot, "SKILL.md"))],
+				diagnostics: [] as ResourceDiagnostic[],
+			});
+
+			expect(result.skills).toEqual([]);
+			expect(
+				result.diagnostics.some((diagnostic) =>
+					diagnostic.message.includes("outside the configured roots")
+				)
+			).toBe(true);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("skips oversized skills but keeps them available for explicit review via diagnostics", () => {
+		const root = mkdtempSync(join(tmpdir(), "phi-skills-"));
+		const skillsRoot = join(root, "skills");
+		const skillDir = join(skillsRoot, "huge-skill");
+		const skillFilePath = join(skillDir, "SKILL.md");
+
+		try {
+			mkdirSync(skillDir, { recursive: true });
+			writeFileSync(skillFilePath, "x".repeat(256), "utf-8");
+
+			const override = createPhiSkillsOverride({
+				roots: [skillsRoot],
+				maxSkillFileBytes: 32,
+			});
+			const result = override({
+				skills: [createSkill(skillFilePath)],
+				diagnostics: [] as ResourceDiagnostic[],
+			});
+
+			expect(result.skills).toEqual([]);
+			expect(
+				result.diagnostics.some((diagnostic) =>
+					diagnostic.message.includes("oversized skill file")
+				)
+			).toBe(true);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("limits prompt-visible skills without removing later skills from the loader", () => {
+		const visible = limitSkillsForPrompt(
+			[
+				{
+					name: "alpha",
+					description: "a".repeat(400),
+					filePath: "/tmp/alpha/SKILL.md",
+					baseDir: "/tmp/alpha",
+					source: "path",
+					disableModelInvocation: false,
+				},
+				{
+					name: "beta",
+					description: "b".repeat(400),
+					filePath: "/tmp/beta/SKILL.md",
+					baseDir: "/tmp/beta",
+					source: "path",
+					disableModelInvocation: false,
+				},
+			],
+			900
+		);
+
+		expect(visible.map((skill) => skill.name)).toEqual(["alpha"]);
 	});
 });

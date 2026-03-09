@@ -27,9 +27,17 @@ import {
 	type PhiConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
+import {
+	applySkillEnvOverrides,
+	resolveLoadedSkillEnvOverrides,
+} from "@phi/core/skill-env";
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
-import { resolvePhiSkillPaths } from "@phi/core/skills";
+import {
+	createPhiSkillsOverride,
+	resolvePhiSkillPaths,
+} from "@phi/core/skills";
+import { loadPhiWorkspaceConfig } from "@phi/core/workspace-config";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 import {
@@ -88,13 +96,17 @@ async function createPhiResourceLoader(params: {
 		agentDir: params.agentDir,
 		extensionFactoryCount: params.extensionFactories?.length ?? 0,
 	});
+	const skillPaths = resolvePhiSkillPaths({
+		workspaceDir: params.cwd,
+		userHomeDir,
+	});
 	const resourceLoader = new DefaultResourceLoader({
 		cwd: params.cwd,
 		agentDir: params.agentDir,
 		noSkills: true,
-		additionalSkillPaths: resolvePhiSkillPaths({
-			workspaceDir: params.cwd,
-			userHomeDir,
+		additionalSkillPaths: skillPaths,
+		skillsOverride: createPhiSkillsOverride({
+			roots: skillPaths,
 		}),
 		extensionFactories: [
 			createPhiMemoryMaintenanceExtension({
@@ -208,22 +220,48 @@ export async function createPhiAgentSession(
 		extensionFactories: options.extensionFactories,
 	});
 
-	const { session } = await createAgentSession({
-		cwd: context.chatWorkspaceDir,
-		agentDir: context.agentDir,
-		authStorage: context.authStorage,
-		modelRegistry: context.modelRegistry,
-		model: context.model,
-		thinkingLevel: context.agentConfig.thinkingLevel,
-		sessionManager:
-			options.sessionManager ??
-			SessionManager.continueRecent(
-				context.chatWorkspaceDir,
-				context.chatWorkspaceLayout.sessionsDir
-			),
-		resourceLoader: context.resourceLoader,
-		customTools: options.customTools,
+	const workspaceConfig = loadPhiWorkspaceConfig(
+		context.chatWorkspaceLayout.configFilePath
+	);
+	const envOverrides = resolveLoadedSkillEnvOverrides({
+		skills: context.resourceLoader.getSkills().skills,
+		workspaceConfig,
+		configFilePath: context.chatWorkspaceLayout.configFilePath,
 	});
+	const restoreSkillEnv = applySkillEnvOverrides(envOverrides);
+
+	let session: AgentSession;
+	try {
+		const created = await createAgentSession({
+			cwd: context.chatWorkspaceDir,
+			agentDir: context.agentDir,
+			authStorage: context.authStorage,
+			modelRegistry: context.modelRegistry,
+			model: context.model,
+			thinkingLevel: context.agentConfig.thinkingLevel,
+			sessionManager:
+				options.sessionManager ??
+				SessionManager.continueRecent(
+					context.chatWorkspaceDir,
+					context.chatWorkspaceLayout.sessionsDir
+				),
+			resourceLoader: context.resourceLoader,
+			customTools: options.customTools,
+		});
+		session = created.session;
+	} catch (error) {
+		restoreSkillEnv();
+		throw error;
+	}
+
+	const originalDispose = session.dispose.bind(session);
+	session.dispose = (): void => {
+		try {
+			restoreSkillEnv();
+		} finally {
+			originalDispose();
+		}
+	};
 
 	const systemPrompt = installPhiSystemPrompt({
 		session,

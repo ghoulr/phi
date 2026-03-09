@@ -16,10 +16,19 @@ export interface PhiWorkspaceCronConfig {
 	jobs?: CronJobDefinition[];
 }
 
+export interface PhiWorkspaceSkillEntryConfig {
+	env?: Record<string, string>;
+}
+
+export interface PhiWorkspaceSkillsConfig {
+	entries?: Record<string, PhiWorkspaceSkillEntryConfig>;
+}
+
 export interface PhiWorkspaceConfig {
 	version?: number;
 	chat?: PhiWorkspaceChatConfig;
 	cron?: PhiWorkspaceCronConfig;
+	skills?: PhiWorkspaceSkillsConfig;
 }
 
 export const PHI_WORKSPACE_CONFIG_VERSION = 1;
@@ -77,6 +86,7 @@ export function loadPhiWorkspaceConfig(
 
 	requireOptionalRecord(rawConfig.chat, "chat", configFilePath);
 	requireOptionalRecord(rawConfig.cron, "cron", configFilePath);
+	requireOptionalRecord(rawConfig.skills, "skills", configFilePath);
 	return rawConfig as PhiWorkspaceConfig;
 }
 
@@ -115,4 +125,60 @@ export function resolveWorkspaceCronJobDefinitions(
 		);
 	}
 	return jobs as CronJobDefinition[];
+}
+
+export function resolveWorkspaceSkillEnvOverrides(
+	workspaceConfig: PhiWorkspaceConfig,
+	configFilePath: string
+): Record<string, Record<string, string>> {
+	const skillsConfig = workspaceConfig.skills;
+	if (!skillsConfig) {
+		return {};
+	}
+
+	const entries = skillsConfig.entries;
+	if (entries === undefined) {
+		return {};
+	}
+	if (!isRecord(entries)) {
+		throw new Error(
+			`Invalid workspace config: skills.entries must be a mapping (${configFilePath})`
+		);
+	}
+
+	const resolved: Record<string, Record<string, string>> = {};
+	for (const [skillName, rawEntry] of Object.entries(entries)) {
+		if (!isRecord(rawEntry)) {
+			throw new Error(
+				`Invalid workspace config: skills.entries.${skillName} must be a mapping (${configFilePath})`
+			);
+		}
+		const rawEnv = rawEntry.env;
+		if (rawEnv === undefined) {
+			continue;
+		}
+		if (!isRecord(rawEnv)) {
+			throw new Error(
+				`Invalid workspace config: skills.entries.${skillName}.env must be a mapping (${configFilePath})`
+			);
+		}
+
+		const env: Record<string, string> = {};
+		for (const [rawEnvKey, rawEnvValue] of Object.entries(rawEnv)) {
+			const envKey = rawEnvKey.trim();
+			if (!envKey) {
+				throw new Error(
+					`Invalid workspace config: skills.entries.${skillName}.env contains an empty key (${configFilePath})`
+				);
+			}
+			if (typeof rawEnvValue !== "string") {
+				throw new Error(
+					`Invalid workspace config: skills.entries.${skillName}.env.${envKey} must be a string (${configFilePath})`
+				);
+			}
+			env[envKey] = rawEnvValue;
+		}
+		resolved[skillName] = env;
+	}
+	return resolved;
 }

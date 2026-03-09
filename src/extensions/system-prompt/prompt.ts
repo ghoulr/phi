@@ -6,6 +6,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 
 import { buildPhiMemoryPromptPaths } from "@phi/core/memory-paths";
+import { limitSkillsForPrompt } from "@phi/core/skills";
 
 export interface BuildPhiSystemPromptParams {
 	assistantName: string;
@@ -131,7 +132,7 @@ function buildToolGuidance(toolNames: string[]): string[] {
 }
 
 function buildSkillsText(skills: Skill[]): string {
-	return formatSkillsForPrompt(skills).trim();
+	return formatSkillsForPrompt(limitSkillsForPrompt(skills)).trim();
 }
 
 function readMemoryText(memoryFilePath: string): string {
@@ -169,8 +170,9 @@ function buildWorkspaceSection(params: {
 		"",
 		"- timezone",
 		"- cron",
+		"- skills env",
 		"",
-		"After config modification, call `reload` for hot-reload.",
+		"After workspace config changes, call `reload`.",
 		"",
 		"See `docs/concepts/workspace-config.md`."
 	);

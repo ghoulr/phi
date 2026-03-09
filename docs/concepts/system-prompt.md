@@ -14,13 +14,16 @@ Describes the system prompt used by phi chat sessions.
 `buildPhiSystemPrompt(...)` receives:
 
 | Input | Service chat | TUI chat |
-|-------|-------------|----------|
+| --- | --- | --- |
 | `assistantName` | `"Phi"` | `"Phi"` |
-| `workspacePath` | from `chats.<id>.workspace` | current `cwd` |
-| `skills` | `resourceLoader.getSkills()` | pi-style loading |
+| `workspacePath` | `chats.<id>.workspace` | current `cwd` |
+| `skills` | `resourceLoader.getSkills().skills` | `resourceLoader.getSkills().skills` |
 | `memoryFilePath` | `<workspace>/.phi/memory/MEMORY.md` | `~/.phi/pi/memory/MEMORY.md` |
-| `toolNames` | `read`, `bash`, `edit`, `write` + runtime tools (`reload`, `send`) | `read`, `bash`, `edit`, `write` |
+| `toolNames` | built-in file tools plus runtime tools when available | built-in file tools |
 | `eventText` | optional | optional |
+
+Service chat skills come from pi `DefaultResourceLoader` with phi-managed skill roots.
+TUI chat uses pi skill loading from the global phi state.
 
 ## Prompt sections
 
@@ -28,25 +31,28 @@ Describes the system prompt used by phi chat sessions.
 2. `## Workspace`
 3. `## Skills` (when non-empty)
 4. `## Memory`
-6. `## Tools`
-7. Tool guidance
-8. `## Message Format`
+5. `## Tools`
+6. Tool guidance
+7. `## Message Format`
 
-## Workspace Layout
+## Workspace layout
 
-Workspace root: `${params.workspacePath}`,
+Workspace root is `${params.workspacePath}`.
 Use workspace files and directories as the source of truth for persistent context.
 
-append text below in service chat:
+Service chat appends extra guidance:
 
-Phi config file is `<workspace>/.phi/config.yaml`, read `<workspace>/.phi/config.template.yaml` to learn config details about:
-
-- timezone
-- cron
-
-After config modification, call `reload` for hot-reload.
+- Workspace config: `<workspace>/.phi/config.yaml`
+- Template: `<workspace>/.phi/config.template.yaml`
+- Call `reload` after workspace config changes
 
 See `docs/concepts/workspace-config.md`.
+
+## Skills in the prompt
+
+Phi uses the skills already loaded into the session resource loader.
+Skill file changes do not rewrite the current system prompt — the agent already knows files it created or edited in the current session.
+New sessions pick up the updated discovered skills.
 
 ## Message format
 
@@ -55,13 +61,14 @@ This is metadata, not user input. The agent should not mention it to the user.
 
 ## Memory rules
 
-- `MEMORY.md` — durable facts, injected into prompt. Keep small.
-- `YYYY-MM-DD.md` — daily notes, not injected. Read on demand.
-- Current `MEMORY.md` content is appended to the prompt when non-empty.
+- `MEMORY.md` — durable memory injected into the prompt. Keep it small.
+- `YYYY-MM-DD.md` — daily notes, not injected automatically.
+- Current memory content is appended to the prompt when non-empty.
 
 ## Runtime behavior
 
-phi owns the system prompt as a dedicated extension.
+Phi owns the system prompt as a dedicated extension.
 It monkey-patches pi's internal prompt rebuild so the phi prompt persists across turns.
 
-Memory maintenance runs as a separate transient turn (see `docs/concepts/transient-turn.md`).
+Memory maintenance runs as a separate transient turn.
+See `docs/concepts/transient-turn.md`.

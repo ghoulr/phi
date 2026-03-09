@@ -1,33 +1,34 @@
 # Skills
 
-How phi discovers and loads skills.
+Phi uses pi skills directly. Discovery, validation, prompt formatting, and `/skill:name` expansion all come from pi.
 
-## Locations
+## Sources
 
-### Service chat
+Skill lookup by priority (first match wins):
 
-Two scopes, chat-scoped wins on name collision:
+1. `<workspace>/.phi/skills` — chat-scoped
+2. `~/.phi/pi/skills` — global
 
-1. `<workspace>/.phi/skills` (chat-scoped)
-2. `~/.phi/pi/skills` (global)
+TUI chat loads global skills from `~/.phi/pi/skills`.
 
-### TUI chat
+## Loader
 
-Uses pi-style loading rooted at `~/.phi/pi`. Does not use `<cwd>/.phi/skills`.
+Service chat builds a pi `DefaultResourceLoader` with `noSkills: true` and explicit `additionalSkillPaths`.
+Phi does not implement a separate skill runtime.
 
-## Loader setup
+## Prompt and commands
 
-Service chat uses `DefaultResourceLoader` with `noSkills: true` and `additionalSkillPaths` from `resolvePhiSkillPaths(...)`.
+- Loaded skills are exposed via pi `formatSkillsForPrompt(...)`.
+- `disable-model-invocation: true` hides the skill from the system prompt but keeps `/skill:name` available.
+- Skills are not hot-reloaded within a session. New sessions discover the updated skill set.
 
-TUI uses pi-style `DefaultResourceLoader` directly.
+## Skill env
 
-## Prompt exposure
+`skills.entries.<name>.env` in workspace config sets per-skill environment overrides.
+Phi injects env only for skills loaded into the current session.
 
-Skills are formatted by `formatSkillsForPrompt(skills)`.
-Skills with `disable-model-invocation: true` are excluded.
+## Safety
 
-## Configuration
-
-- Global skills: `~/.phi/pi/skills`
-- Chat-scoped skills: `<workspace>/.phi/skills`
-- Workspace config: see `docs/concepts/workspace-config.md`
+- Skill loading stays inside the configured roots; escaping paths are ignored.
+- Oversized files may be skipped.
+- Prompt-visible skills may be capped to keep the system prompt small.
