@@ -1,7 +1,8 @@
 # TODO
 
 - [ ] correct rich-text message format per channel
-- [ ] agent-aware configuration
+- [X] agent-aware configuration
 - [ ] session management
+- [ ] openclaw skill hub support
 - [ ] heartbeat
 - [ ] identity and soul(?)
