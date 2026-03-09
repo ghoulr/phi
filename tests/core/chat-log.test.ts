@@ -1,72 +1,58 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 
 import {
 	appendChatLogEntry,
 	hasOutboundChatLogEntry,
+	resetChatLogStateForTest,
 } from "@phi/core/chat-log";
+import { resetPhiLoggerForTest } from "@phi/core/logger";
+
+afterEach(() => {
+	resetChatLogStateForTest();
+	resetPhiLoggerForTest();
+});
 
 describe("chat log", () => {
-	it("returns false when log file does not exist", () => {
-		expect(
-			hasOutboundChatLogEntry(
-				"/tmp/phi-log-file-does-not-exist.jsonl",
-				"k"
-			)
-		).toBe(false);
+	it("returns false when outbound idempotency key was never recorded", () => {
+		expect(hasOutboundChatLogEntry("k")).toBe(false);
 	});
 
 	it("detects whether outbound entry exists by idempotency key", () => {
-		const root = mkdtempSync(join(tmpdir(), "phi-chat-log-"));
-		const logFilePath = join(root, "logs.jsonl");
+		appendChatLogEntry({
+			idempotencyKey: "k1",
+			channel: "telegram",
+			chatId: "user-alice",
+			telegramChatId: "42",
+			telegramUpdateId: "100",
+			telegramMessageId: "10",
+			direction: "inbound",
+			source: "user",
+			text: "hello",
+		});
+		appendChatLogEntry({
+			idempotencyKey: "k2",
+			channel: "telegram",
+			chatId: "user-bob",
+			telegramChatId: "43",
+			telegramUpdateId: "101",
+			telegramMessageId: "11",
+			direction: "inbound",
+			source: "user",
+			text: "hey",
+		});
+		appendChatLogEntry({
+			idempotencyKey: "k1",
+			channel: "telegram",
+			chatId: "user-alice",
+			telegramChatId: "42",
+			telegramUpdateId: "100",
+			telegramMessageId: "10",
+			direction: "outbound",
+			source: "assistant",
+			text: "reply",
+		});
 
-		try {
-			appendChatLogEntry(logFilePath, {
-				idempotencyKey: "k1",
-				channel: "telegram",
-				chatId: "user-alice",
-				telegramChatId: "42",
-				telegramUpdateId: "100",
-				telegramMessageId: "10",
-				direction: "inbound",
-				source: "user",
-				text: "hello",
-			});
-			appendChatLogEntry(logFilePath, {
-				idempotencyKey: "k2",
-				channel: "telegram",
-				chatId: "user-bob",
-				telegramChatId: "43",
-				telegramUpdateId: "101",
-				telegramMessageId: "11",
-				direction: "inbound",
-				source: "user",
-				text: "hey",
-			});
-			appendChatLogEntry(logFilePath, {
-				idempotencyKey: "k1",
-				channel: "telegram",
-				chatId: "user-alice",
-				telegramChatId: "42",
-				telegramUpdateId: "100",
-				telegramMessageId: "10",
-				direction: "outbound",
-				source: "assistant",
-				text: "reply",
-			});
-
-			expect(hasOutboundChatLogEntry(logFilePath, "k1")).toBe(true);
-			expect(hasOutboundChatLogEntry(logFilePath, "k2")).toBe(false);
-
-			const allLines = readFileSync(logFilePath, "utf-8")
-				.split("\n")
-				.filter((line) => line.length > 0);
-			expect(allLines).toHaveLength(3);
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
+		expect(hasOutboundChatLogEntry("k1")).toBe(true);
+		expect(hasOutboundChatLogEntry("k2")).toBe(false);
 	});
 });

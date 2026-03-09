@@ -31,7 +31,7 @@ agents:
 # Chats - User resource containers
 chats:
   user-alice:
-    # Workspace where .phi/ (sessions, memory, logs) lives
+    # Workspace where .phi/ (sessions, memory, inbox, cron jobs) lives
     workspace: "~/phi/workspaces/alice"
     # Bind to agent template
     agent: main

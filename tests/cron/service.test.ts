@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
@@ -9,13 +10,43 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 
 import { InMemoryChatExecutor } from "@phi/core/chat-executor";
 import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
+import { resetChatLogStateForTest } from "@phi/core/chat-log";
+import {
+	resetPhiLoggerForTest,
+	setPhiLoggerSettingsForTest,
+} from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
 import { startCronService } from "@phi/cron/service";
 
 const createdRoots: string[] = [];
+let logOutput = "";
+let logCaptureConfigured = false;
+
+function ensureLogCapture(): void {
+	if (logCaptureConfigured) {
+		return;
+	}
+	const stream = new Writable({
+		write(chunk, _encoding, callback) {
+			logOutput += chunk.toString();
+			callback();
+		},
+	});
+	setPhiLoggerSettingsForTest({
+		level: "debug",
+		format: "json",
+		stream,
+	});
+	logCaptureConfigured = true;
+}
+
+function readCapturedLogs(): string {
+	return logOutput;
+}
 
 function createWorkspace(): string {
+	ensureLogCapture();
 	const root = mkdtempSync(join(tmpdir(), "phi-cron-service-"));
 	createdRoots.push(root);
 	return root;
@@ -68,6 +99,10 @@ function createAssistantMessage(text: string): AssistantMessage {
 }
 
 afterEach(() => {
+	resetChatLogStateForTest();
+	resetPhiLoggerForTest();
+	logOutput = "";
+	logCaptureConfigured = false;
 	for (const root of createdRoots) {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -138,9 +173,9 @@ describe("startCronService", () => {
 		await service.stop();
 
 		expect(publishCalls).toBe(1);
-		expect(readFileSync(layout.cronRunsFilePath, "utf-8")).toContain(
-			'"status":"ok"'
-		);
+		const logContent = readCapturedLogs();
+		expect(logContent).toContain('"event":"cron.run"');
+		expect(logContent).toContain('"status":"ok"');
 	});
 
 	it("keeps the previous valid state when reload fails", async () => {

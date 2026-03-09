@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendStructuredLogEntry } from "@phi/core/logger";
 
 export type ChatLogDirection = "inbound" | "outbound";
 
@@ -14,53 +14,27 @@ export interface ChatLogEntry {
 	direction: ChatLogDirection;
 	source: ChatLogSource;
 	text: string;
-	timestamp: string;
 }
 
-function toJsonLine(entry: ChatLogEntry): string {
-	return `${JSON.stringify(entry)}\n`;
-}
+const deliveredOutboundIdempotencyKeys = new Set<string>();
 
-function parseJsonLine(line: string): ChatLogEntry {
-	return JSON.parse(line) as ChatLogEntry;
-}
-
-export function appendChatLogEntry(
-	logFilePath: string,
-	entry: Omit<ChatLogEntry, "timestamp">
-): void {
-	appendFileSync(
-		logFilePath,
-		toJsonLine({ ...entry, timestamp: new Date().toISOString() }),
-		"utf-8"
-	);
-}
-
-export function hasOutboundChatLogEntry(
-	logFilePath: string,
-	idempotencyKey: string
-): boolean {
-	if (!existsSync(logFilePath)) {
-		return false;
+export function appendChatLogEntry(entry: ChatLogEntry): void {
+	if (entry.direction === "outbound") {
+		deliveredOutboundIdempotencyKeys.add(entry.idempotencyKey);
 	}
+	appendStructuredLogEntry({
+		tag: entry.channel,
+		event: "telegram.message",
+		category: "audit",
+		message: `telegram ${entry.direction} message`,
+		...entry,
+	});
+}
 
-	const lines = readFileSync(logFilePath, "utf-8")
-		.split("\n")
-		.filter((line) => line.length > 0);
+export function hasOutboundChatLogEntry(idempotencyKey: string): boolean {
+	return deliveredOutboundIdempotencyKeys.has(idempotencyKey);
+}
 
-	for (let index = lines.length - 1; index >= 0; index -= 1) {
-		const line = lines[index];
-		if (line === undefined) {
-			continue;
-		}
-		const entry = parseJsonLine(line);
-		if (
-			entry.idempotencyKey === idempotencyKey &&
-			entry.direction === "outbound"
-		) {
-			return true;
-		}
-	}
-
-	return false;
+export function resetChatLogStateForTest(): void {
+	deliveredOutboundIdempotencyKeys.clear();
 }

@@ -24,7 +24,6 @@ describe("ensureChatWorkspaceLayout", () => {
 			expect(existsSync(layout.phiDir)).toBe(true);
 			expect(existsSync(layout.sessionsDir)).toBe(true);
 			expect(existsSync(layout.memoryDir)).toBe(true);
-			expect(existsSync(layout.logsDir)).toBe(true);
 			expect(existsSync(layout.skillsDir)).toBe(true);
 			expect(existsSync(layout.inboxDir)).toBe(true);
 			expect(existsSync(layout.cronDir)).toBe(true);

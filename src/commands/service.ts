@@ -11,6 +11,7 @@ import {
 	type ResolvedCronChatServiceConfig,
 	type ResolvedTelegramChatServiceConfig,
 } from "@phi/core/config";
+import { getPhiLogger } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
 import { startCronService, type RunningCronService } from "@phi/cron/service";
@@ -25,6 +26,8 @@ interface RunningServicePart {
 	done: Promise<void>;
 	stop(): Promise<void>;
 }
+
+const log = getPhiLogger("service");
 
 export interface ServiceCommandDependencies {
 	resolveTelegramChats(
@@ -126,21 +129,6 @@ async function stopAllServices(services: RunningServicePart[]): Promise<void> {
 	);
 }
 
-async function printSystemPromptDebugOutput(
-	runtime: ChatSessionRuntime<AgentSession>,
-	chatConfigs: ResolvedTelegramChatServiceConfig[]
-): Promise<void> {
-	const uniqueChatIds = Array.from(
-		new Set(chatConfigs.map((chatConfig) => chatConfig.chatId))
-	);
-	for (const chatId of uniqueChatIds) {
-		const session = await runtime.getOrCreateSession(chatId);
-		console.debug(
-			`[phi][debug] generated system prompt for chat ${chatId}:\n${session.systemPrompt}`
-		);
-	}
-}
-
 export async function runServiceCommand(
 	runtime: ChatSessionRuntime<AgentSession>,
 	phiConfig: PhiConfig,
@@ -154,7 +142,10 @@ export async function runServiceCommand(
 	const cronChats = resolvedDependencies.resolveCronChats(phiConfig);
 	const chatExecutor = resolvedDependencies.createChatExecutor();
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
-	await printSystemPromptDebugOutput(runtime, telegramChats);
+	log.info("service.command.starting", {
+		telegramChatCount: telegramChats.length,
+		cronChatCount: cronChats.length,
+	});
 	const telegramBotConfigs = buildTelegramBotConfigs(telegramChats);
 
 	const runningServices: RunningServicePart[] = [];
@@ -167,16 +158,32 @@ export async function runServiceCommand(
 			reloadRegistry
 		);
 		runningServices.push(cronRuntime);
+		log.info("service.cron.started", {
+			cronChatCount: cronChats.length,
+		});
 
 		for (const botConfig of telegramBotConfigs) {
+			log.info("service.telegram.starting", {
+				routeCount: Object.keys(botConfig.chatRoutes).length,
+			});
 			const runningBot = await resolvedDependencies.startTelegramBot(
 				runtime,
 				botConfig,
 				chatExecutor
 			);
 			runningServices.push(runningBot);
+			log.info("service.telegram.started", {
+				routeCount: Object.keys(botConfig.chatRoutes).length,
+			});
 		}
+		log.info("service.command.started", {
+			runningServiceCount: runningServices.length,
+		});
 	} catch (error: unknown) {
+		log.error("service.command.start_failed", {
+			err: error instanceof Error ? error : new Error(String(error)),
+			runningServiceCount: runningServices.length,
+		});
 		await stopAllServices(runningServices);
 		throw error;
 	}
@@ -187,10 +194,19 @@ export async function runServiceCommand(
 			return;
 		}
 		stopping = true;
+		log.info("service.command.stopping", {
+			runningServiceCount: runningServices.length,
+		});
 		await stopAllServices(runningServices);
+		log.info("service.command.stopped", {
+			runningServiceCount: runningServices.length,
+		});
 	};
 
 	const stopHandler = (): void => {
+		log.info("service.command.signal_received", {
+			signal: "shutdown",
+		});
 		void stopService();
 	};
 

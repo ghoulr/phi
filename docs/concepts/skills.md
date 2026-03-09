@@ -36,8 +36,9 @@ For chat runtime sessions, `ensureChatWorkspaceLayout(...)` creates:
 
 - `<chat-workspace>/.phi/sessions`
 - `<chat-workspace>/.phi/memory`
-- `<chat-workspace>/.phi/logs`
 - `<chat-workspace>/.phi/skills`
+- `<chat-workspace>/.phi/inbox`
+- `<chat-workspace>/.phi/cron`
 
 ## Loader Configuration
 

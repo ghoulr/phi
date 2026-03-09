@@ -59,7 +59,10 @@ Chat workspaces are configured in `phi.yaml`:
    ├─ memory/
    │  ├─ MEMORY.md
    │  └─ YYYY-MM-DD.md
-   └─ logs/               # Message logs
+   ├─ inbox/               # Inbound attachments
+   └─ cron/
+      ├─ jobs.yaml
+      └─ jobs/
 ```
 
 ## Run
@@ -84,3 +87,18 @@ bun index.ts service
 ```
 
 Service reads all configurations from `~/.phi/phi.yaml`.
+
+## Logging
+
+Phi writes all logs to stdio.
+
+- development: pretty console logs via `pino-pretty`
+- production: structured JSONL logs to stdout for collectors such as `journald`
+
+Every log record includes a `tag` field such as `service`, `runtime`, `telegram`, or `cron`.
+Use your own filters to inspect one subsystem only.
+
+Environment overrides:
+
+- `PHI_LOG_LEVEL`: log level (`silent`, `debug`, `info`, `warn`, `error`)
+- `PHI_LOG_FORMAT`: log format (`pretty`, `json`)

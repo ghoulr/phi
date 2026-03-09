@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
@@ -11,6 +12,16 @@ import type {
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { Message } from "@grammyjs/types";
 
+import { resetChatLogStateForTest } from "@phi/core/chat-log";
+import {
+	resetPhiLoggerForTest,
+	setPhiLoggerSettingsForTest,
+} from "@phi/core/logger";
+import type { ChatSessionRuntime } from "@phi/core/runtime";
+import {
+	registerPhiMessagingSessionState,
+	PhiMessagingSessionState,
+} from "@phi/messaging/session-state";
 import {
 	buildTelegramSystemReminderMetadata,
 	startTelegramPollingBot,
@@ -18,11 +29,6 @@ import {
 	type TelegramRouteTarget,
 	type TelegramTextMessageContext,
 } from "@phi/services/telegram";
-import {
-	registerPhiMessagingSessionState,
-	PhiMessagingSessionState,
-} from "@phi/messaging/session-state";
-import type { ChatSessionRuntime } from "@phi/core/runtime";
 
 class FakeTelegramBot implements TelegramPollingBot {
 	private textMessageHandler?: (
@@ -211,14 +217,43 @@ function createFakeRuntime(responseText: string): {
 
 let nextUpdateId = 1;
 const createdWorkspaces: string[] = [];
+let currentLogOutput = "";
+let logCaptureConfigured = false;
+
+function ensureLogCapture(): void {
+	if (logCaptureConfigured) {
+		return;
+	}
+	const stream = new Writable({
+		write(chunk, _encoding, callback) {
+			currentLogOutput += chunk.toString();
+			callback();
+		},
+	});
+	setPhiLoggerSettingsForTest({
+		level: "debug",
+		format: "json",
+		stream,
+	});
+	logCaptureConfigured = true;
+}
+
+function readCapturedLogs(): string {
+	return currentLogOutput;
+}
 
 function createRouteTarget(chatId: string): TelegramRouteTarget {
+	ensureLogCapture();
 	const workspace = mkdtempSync(join(tmpdir(), "phi-telegram-workspace-"));
 	createdWorkspaces.push(workspace);
 	return { chatId, workspace };
 }
 
 afterEach(() => {
+	resetChatLogStateForTest();
+	resetPhiLoggerForTest();
+	currentLogOutput = "";
+	logCaptureConfigured = false;
 	for (const workspace of createdWorkspaces) {
 		rmSync(workspace, { recursive: true, force: true });
 	}
@@ -844,10 +879,7 @@ describe("telegram service", () => {
 			},
 		]);
 
-		const logsContent = readFileSync(
-			join(route.workspace, ".phi", "logs", "logs.jsonl"),
-			"utf-8"
-		);
+		const logsContent = readCapturedLogs();
 		expect(logsContent.includes('"direction":"inbound"')).toBe(true);
 		expect(logsContent.includes('"source":"error"')).toBe(true);
 		expect(logsContent.includes('"text":"runtime unavailable"')).toBe(true);
@@ -946,14 +978,13 @@ describe("telegram service", () => {
 		]);
 		expect(fakeBot.sentTexts[0]?.replyToMessageId).toBeUndefined();
 
-		const logsContent = readFileSync(
-			join(route.workspace, ".phi", "logs", "logs.jsonl"),
-			"utf-8"
-		);
+		const logsContent = readCapturedLogs();
 		expect(logsContent.includes('"direction":"outbound"')).toBe(true);
 		expect(logsContent.includes('"source":"assistant"')).toBe(true);
-		const lines = logsContent.split("\n").filter((line) => line.length > 0);
-		expect(lines).toHaveLength(2);
+		const auditLines = logsContent
+			.split("\n")
+			.filter((line) => line.includes('"category":"audit"'));
+		expect(auditLines).toHaveLength(2);
 	});
 
 	it("sends typing for assistant thoughts and text, not tool calls", async () => {

@@ -1,8 +1,9 @@
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 import { parse } from "yaml";
 
+import { appendStructuredLogEntry } from "@phi/core/logger";
 import type { ChatWorkspaceLayout } from "@phi/core/chat-workspace";
 import type {
 	CronJobDefinition,
@@ -138,9 +139,12 @@ export function loadCronJobs(params: {
 	return loadedJobs;
 }
 
-export function appendCronRunLog(
-	filePath: string,
-	entry: CronRunLogEntry
-): void {
-	appendFileSync(filePath, `${JSON.stringify(entry)}\n`, "utf-8");
+export function appendCronRunLog(entry: CronRunLogEntry): void {
+	appendStructuredLogEntry({
+		tag: "cron",
+		event: "cron.run",
+		category: "audit",
+		message: `cron job ${entry.status}`,
+		...entry,
+	});
 }

@@ -16,7 +16,6 @@ Cron state lives under the chat workspace state root.
 └─ .phi/
    └─ cron/
       ├─ jobs.yaml
-      ├─ runs.jsonl
       └─ jobs/
          ├─ daily-summary.md
          └─ weekly-review.md
@@ -24,7 +23,7 @@ Cron state lives under the chat workspace state root.
 
 - `jobs.yaml` stores job metadata
 - `jobs/*.md` stores the task prompt for each job
-- `runs.jsonl` stores execution results
+- cron execution results are emitted as structured logs with `tag="cron"`
 
 ## Chat config
 
@@ -112,7 +111,7 @@ When a job becomes due, phi:
 3. starts a fresh agent run for that job
 4. runs the task in the chat workspace with the chat config
 5. appends the final assistant result to the current chat session
-6. appends the result to `runs.jsonl`
+6. emits a structured run record to stdio
 7. recomputes the next run
 
 Different chats may run concurrently.

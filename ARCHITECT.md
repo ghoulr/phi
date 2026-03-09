@@ -89,7 +89,9 @@ Service -> Runtime -> Chat -> pi session
    ├─ memory/
    │  ├─ MEMORY.md
    │  └─ YYYY-MM-DD.md
-   └─ logs/
+   ├─ inbox/
+   └─ cron/
+      └─ jobs/
 ```
 
 ## Memory

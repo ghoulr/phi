@@ -26,6 +26,7 @@ import {
 	resolveChatRuntimeConfig,
 	type PhiConfig,
 } from "@phi/core/config";
+import { getPhiLogger } from "@phi/core/logger";
 import { getPhiSharedAuthFilePath } from "@phi/core/paths";
 import { resolveExistingPhiPiAgentDir } from "@phi/core/pi-agent-dir";
 import { resolvePhiSkillPaths } from "@phi/core/skills";
@@ -44,6 +45,8 @@ export {
 } from "@phi/core/chat-pool";
 
 const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
+
+const log = getPhiLogger("runtime");
 
 export interface CreatePhiAgentSessionOptions {
 	sessionManager?: SessionManager;
@@ -79,6 +82,11 @@ async function createPhiResourceLoader(params: {
 	extensionFactories?: ExtensionFactory[];
 }): Promise<DefaultResourceLoader> {
 	const userHomeDir = params.userHomeDir ?? homedir();
+	log.debug("runtime.resource_loader.reloading", {
+		workspaceDir: params.cwd,
+		agentDir: params.agentDir,
+		extensionFactoryCount: params.extensionFactories?.length ?? 0,
+	});
 	const resourceLoader = new DefaultResourceLoader({
 		cwd: params.cwd,
 		agentDir: params.agentDir,
@@ -96,6 +104,11 @@ async function createPhiResourceLoader(params: {
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();
+	log.debug("runtime.resource_loader.reloaded", {
+		workspaceDir: params.cwd,
+		agentDir: params.agentDir,
+		skillCount: resourceLoader.getSkills().skills.length,
+	});
 	return resourceLoader;
 }
 
@@ -137,6 +150,13 @@ async function resolvePhiSessionContext(
 		userHomeDir,
 		extensionFactories: options.extensionFactories,
 	});
+	log.info("runtime.session_context.resolved", {
+		chatId,
+		workspaceDir: chatWorkspaceDir,
+		agentId: chatConfig.agentId,
+		provider: agentConfig.provider,
+		model: agentConfig.model,
+	});
 
 	return {
 		agentDir,
@@ -168,6 +188,11 @@ export async function createPhiAgentSession(
 	phiConfig: PhiConfig,
 	options: CreatePhiAgentSessionOptions = {}
 ): Promise<AgentSession> {
+	log.info("runtime.session.creating", {
+		chatId,
+		customToolCount: options.customTools?.length ?? 0,
+		extensionFactoryCount: options.extensionFactories?.length ?? 0,
+	});
 	const context = await resolvePhiSessionContext(chatId, phiConfig, {
 		extensionFactories: options.extensionFactories,
 	});
@@ -204,6 +229,12 @@ export async function createPhiAgentSession(
 	if (options.messagingState) {
 		registerPhiMessagingSessionState(session, options.messagingState);
 	}
+	log.info("runtime.session.created", {
+		chatId,
+		workspaceDir: context.chatWorkspaceDir,
+		provider: context.agentConfig.provider,
+		model: context.agentConfig.model,
+	});
 	return session;
 }
 

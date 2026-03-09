@@ -27,7 +27,11 @@ This means the chat owns its own:
 - sessions
 - memory
 - skills
-- logs
+- inbox
+- cron job files
+
+Structured logs are emitted through stdio.
+In production, phi should run behind a collector such as `journald`.
 
 ## TUI Chat
 
