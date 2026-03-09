@@ -147,9 +147,10 @@ describe("buildPhiSystemPrompt", () => {
 			).toBe(true);
 			expect(prompt.includes("- timezone")).toBe(true);
 			expect(prompt.includes("- cron")).toBe(true);
+			expect(prompt.includes("- skills env")).toBe(true);
 			expect(
 				prompt.includes(
-					"After config modification, call `reload` for hot-reload."
+					"After workspace config changes, call `reload`."
 				)
 			).toBe(true);
 		} finally {

@@ -5,32 +5,33 @@ Agent-owned config that lives inside a chat workspace.
 ## Files
 
 | File | Purpose |
-|------|---------|
-| `<workspace>/.phi/config.yaml` | Active config |
-| `<workspace>/.phi/config.template.yaml` | Reference template with all options |
+| --- | --- |
+| `<workspace>/.phi/config.yaml` | active config |
+| `<workspace>/.phi/config.template.yaml` | reference template |
 
-`~/.phi/phi.yaml` is operator-owned. Agents do not modify it.
+`~/.phi/phi.yaml` is operator-owned.
+Agents do not modify it.
 
 ## What it contains
 
-Typical workspace-owned settings:
-
 - `chat.*` — chat-local settings such as timezone
 - `cron.*` — cron enablement and job metadata
+- `skills.entries.<name>.env` — per-skill environment variables
 
 ## How agents use it
 
 1. Read the template to see available options.
 2. Edit `config.yaml` with normal file tools.
-3. Call `reload` to apply changes.
+3. Call `reload` to apply config changes.
 
-No special config tool is needed.
+Skill file creation and edits do not need `reload`.
+New sessions discover the updated skill set automatically.
 
 ## Reload
 
-- Chat-scoped, no parameters.
-- Recreates the current session from workspace files.
-- The current turn finishes normally; the new session takes effect on the next turn.
+Chat-scoped, no parameters.
+Recreates the current session from workspace files.
+The current turn finishes normally; the new session takes effect on the next turn.
 
 ## Template source
 

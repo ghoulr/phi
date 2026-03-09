@@ -28,3 +28,9 @@ cron:
       enabled: true
       prompt: jobs/dentist-reminder.md
       at: "2030-01-15 09:00"
+
+skills:
+  entries:
+    example-skill:
+      env:
+        EXAMPLE_API_KEY: your-api-key
