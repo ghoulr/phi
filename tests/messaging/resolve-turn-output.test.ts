@@ -49,19 +49,15 @@ describe("resolvePhiTurnOutput", () => {
 		]);
 	});
 
-	it("applies the current reply target to turn output", () => {
+	it("delivers assistant text without transport reply metadata", () => {
 		expect(
 			resolvePhiTurnOutput({
 				assistantText: "done",
-				turnContext: {
-					replyToMessageId: "42",
-				},
 			})
 		).toEqual([
 			{
 				text: "done",
 				attachments: [],
-				replyToMessageId: "42",
 			},
 		]);
 	});

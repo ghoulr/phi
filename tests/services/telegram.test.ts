@@ -12,7 +12,6 @@ import type {
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { Message } from "@grammyjs/types";
 
-import { resetChatLogStateForTest } from "@phi/core/chat-log";
 import {
 	resetPhiLoggerForTest,
 	setPhiLoggerSettingsForTest,
@@ -144,12 +143,16 @@ class FakeTelegramBot implements TelegramPollingBot {
 					await this.textMessageHandler?.(update);
 				})
 			);
+			await Promise.resolve();
+			await Promise.resolve();
 			return;
 		}
 
 		for (const update of this.updates) {
 			await this.textMessageHandler(update);
 		}
+		await Promise.resolve();
+		await Promise.resolve();
 	}
 
 	public async stop(): Promise<void> {
@@ -168,9 +171,44 @@ type FakeRuntimeState = {
 	calls: Array<{
 		chatId: string;
 		prompt: string | (TextContent | ImageContent)[];
+		deliverAs?: "steer" | "followUp";
 	}>;
 	disposeCalls: string[];
 };
+
+function createAssistantTurnEndEvent(text: string): AgentSessionEvent {
+	return {
+		type: "turn_end",
+		turnIndex: 0,
+		message: {
+			role: "assistant",
+			content: [{ type: "text", text }],
+		},
+		toolResults: [],
+	} as unknown as AgentSessionEvent;
+}
+
+function createUserMessageStartEvent(text: string): AgentSessionEvent {
+	return {
+		type: "message_start",
+		message: {
+			role: "user",
+			content: [{ type: "text", text }],
+		},
+	} as unknown as AgentSessionEvent;
+}
+
+function createAgentEndEvent(text: string): AgentSessionEvent {
+	return {
+		type: "agent_end",
+		messages: [
+			{
+				role: "assistant",
+				content: [{ type: "text", text }],
+			},
+		],
+	} as unknown as AgentSessionEvent;
+}
 
 function createFakeRuntime(responseText: string): {
 	runtime: ChatSessionRuntime<AgentSession>;
@@ -180,30 +218,36 @@ function createFakeRuntime(responseText: string): {
 		calls: [],
 		disposeCalls: [],
 	};
+	let listener: ((event: AgentSessionEvent) => void) | undefined;
+	let currentChatId = "";
+
+	const session = {
+		isStreaming: false,
+		subscribe(handler: (event: AgentSessionEvent) => void) {
+			listener = handler;
+			return () => {
+				listener = undefined;
+			};
+		},
+		async sendUserMessage(
+			content: string | (TextContent | ImageContent)[],
+			options?: { deliverAs?: "steer" | "followUp" }
+		): Promise<void> {
+			state.calls.push({
+				chatId: currentChatId,
+				prompt: content,
+				deliverAs: options?.deliverAs,
+			});
+			listener?.(createAssistantTurnEndEvent(responseText));
+			listener?.(createAgentEndEvent(responseText));
+		},
+		dispose(): void {},
+	} as unknown as AgentSession;
+	registerPhiMessagingSessionState(session, new PhiMessagingSessionState());
 
 	const runtime: ChatSessionRuntime<AgentSession> = {
 		async getOrCreateSession(chatId: string) {
-			const session = {
-				subscribe() {
-					return () => {};
-				},
-				async sendUserMessage(
-					content: string | (TextContent | ImageContent)[]
-				): Promise<void> {
-					state.calls.push({
-						chatId,
-						prompt: content,
-					});
-				},
-				getLastAssistantText(): string | undefined {
-					return responseText;
-				},
-				dispose(): void {},
-			} as unknown as AgentSession;
-			registerPhiMessagingSessionState(
-				session,
-				new PhiMessagingSessionState()
-			);
+			currentChatId = chatId;
 			return session;
 		},
 		disposeSession(chatId: string): boolean {
@@ -250,7 +294,6 @@ function createRouteTarget(chatId: string): TelegramRouteTarget {
 }
 
 afterEach(() => {
-	resetChatLogStateForTest();
 	resetPhiLoggerForTest();
 	currentLogOutput = "";
 	logCaptureConfigured = false;
@@ -276,7 +319,6 @@ function createContext(
 				},
 			},
 		},
-		reply: async () => ({ ok: true }),
 		sendTyping: async () => ({ ok: true }),
 	};
 	const mergedMessage = { ...base.message, ...overrides?.message };
@@ -685,17 +727,28 @@ describe("telegram service", () => {
 		});
 	});
 
-	it("serializes same-chat jobs when updates arrive concurrently", async () => {
+	it("steers same-chat updates when a session is already streaming", async () => {
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		let releaseFirst: (() => void) | undefined;
-		const order: string[] = [];
+		let streaming = false;
+		let secondQueued = false;
+		const calls: Array<{ text: string | undefined; deliverAs?: string }> =
+			[];
 		const messagingState = new PhiMessagingSessionState();
 
 		const session = {
-			subscribe() {
-				return () => {};
+			get isStreaming() {
+				return streaming;
+			},
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
 			},
 			async sendUserMessage(
-				content: string | (TextContent | ImageContent)[]
+				content: string | (TextContent | ImageContent)[],
+				options?: { deliverAs?: "steer" | "followUp" }
 			): Promise<void> {
 				const text =
 					typeof content === "string"
@@ -707,19 +760,27 @@ describe("telegram service", () => {
 								)
 								.map((part) => part.text)
 								.find((part) => part === "m1" || part === "m2");
+				calls.push({ text, deliverAs: options?.deliverAs });
 				if (text === "m1") {
-					order.push("start1");
+					listener?.(createUserMessageStartEvent("m1"));
+					streaming = true;
 					await new Promise<void>((resolve) => {
 						releaseFirst = resolve;
 					});
-					order.push("end1");
+					listener?.(createAssistantTurnEndEvent("first reply"));
+					if (secondQueued) {
+						listener?.(createUserMessageStartEvent("m2"));
+						listener?.(createAssistantTurnEndEvent("second reply"));
+					}
+					listener?.(
+						createAgentEndEvent(
+							secondQueued ? "second reply" : "first reply"
+						)
+					);
+					streaming = false;
 					return;
 				}
-				order.push("start2");
-				order.push("end2");
-			},
-			getLastAssistantText(): string | undefined {
-				return "ok";
+				secondQueued = true;
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
@@ -759,30 +820,76 @@ describe("telegram service", () => {
 			{ createBot: () => fakeBot }
 		);
 
-		for (
-			let attempt = 0;
-			attempt < 10 && order.length === 0;
-			attempt += 1
-		) {
+		for (let attempt = 0; attempt < 10 && calls.length < 2; attempt += 1) {
 			await Promise.resolve();
 		}
-		expect(order).toEqual(["start1"]);
+		expect(calls).toEqual([
+			{ text: "m1", deliverAs: undefined },
+			{ text: "m2", deliverAs: "steer" },
+		]);
 		if (!releaseFirst) {
 			throw new Error("First resolver was not assigned.");
 		}
 		releaseFirst();
 
 		await running.done;
-		expect(order).toEqual(["start1", "end1", "start2", "end2"]);
 		expect(fakeBot.sentTexts.map((entry) => entry.text)).toEqual([
-			"ok",
-			"ok",
+			"second reply",
 		]);
-		expect(
-			fakeBot.sentTexts.every(
-				(entry) => entry.replyToMessageId === undefined
-			)
-		).toBe(true);
+	});
+
+	it("delivers only the final assistant turn after tool retries", async () => {
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
+		const session = {
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
+			},
+			async sendUserMessage(): Promise<void> {
+				listener?.(createUserMessageStartEvent("hello"));
+				listener?.(createAssistantTurnEndEvent("I will handle it."));
+				listener?.(createAssistantTurnEndEvent("done"));
+				listener?.(createAgentEndEvent("done"));
+			},
+			dispose(): void {},
+		} as unknown as AgentSession;
+		registerPhiMessagingSessionState(
+			session,
+			new PhiMessagingSessionState()
+		);
+
+		const runtime: ChatSessionRuntime<AgentSession> = {
+			async getOrCreateSession() {
+				return session;
+			},
+			disposeSession(): boolean {
+				return true;
+			},
+		};
+		const fakeBot = new FakeTelegramBot([createContext()]);
+
+		const running = await startTelegramPollingBot(
+			runtime,
+			{
+				token: "test-token",
+				chatRoutes: {
+					"42": createRouteTarget("user-alice"),
+				},
+			},
+			{ createBot: () => fakeBot }
+		);
+
+		await running.done;
+		expect(fakeBot.sentTexts).toEqual([
+			{
+				chatId: "42",
+				text: "done",
+				replyToMessageId: undefined,
+			},
+		]);
 	});
 
 	it("replies request error text for unknown chat route", async () => {
@@ -987,11 +1094,68 @@ describe("telegram service", () => {
 		expect(auditLines).toHaveLength(2);
 	});
 
+	it("allows retrying the same update after a failed attempt", async () => {
+		const route = createRouteTarget("user-alice");
+		const fakeBot = new FakeTelegramBot([
+			createContext({
+				updateId: 100,
+				message: { id: 1, text: "hello", attachments: [] },
+			}),
+			createContext({
+				updateId: 100,
+				message: { id: 1, text: "hello", attachments: [] },
+			}),
+		]);
+		const { runtime: successRuntime, state } =
+			createFakeRuntime("assistant reply");
+		let attempt = 0;
+
+		const runtime: ChatSessionRuntime<AgentSession> = {
+			async getOrCreateSession(chatId: string) {
+				attempt += 1;
+				if (attempt === 1) {
+					throw new Error("runtime unavailable");
+				}
+				return await successRuntime.getOrCreateSession(chatId);
+			},
+			disposeSession(chatId: string): boolean {
+				return successRuntime.disposeSession(chatId);
+			},
+		};
+
+		const running = await startTelegramPollingBot(
+			runtime,
+			{
+				token: "test-token",
+				chatRoutes: {
+					"42": route,
+				},
+			},
+			{ createBot: () => fakeBot }
+		);
+
+		await running.done;
+		expect(state.calls).toHaveLength(1);
+		expect(fakeBot.sentTexts).toEqual([
+			{
+				chatId: "42",
+				text: "runtime unavailable",
+				replyToMessageId: "1",
+			},
+			{
+				chatId: "42",
+				text: "assistant reply",
+				replyToMessageId: undefined,
+			},
+		]);
+	});
+
 	it("sends typing for assistant thoughts and text, not tool calls", async () => {
 		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		let typingCalls = 0;
 
 		const session = {
+			isStreaming: false,
 			subscribe(handler: (event: AgentSessionEvent) => void) {
 				listener = handler;
 				return () => {
@@ -1017,9 +1181,8 @@ describe("telegram service", () => {
 					message: { role: "assistant" },
 					assistantMessageEvent: { type: "text_delta" },
 				} as unknown as AgentSessionEvent);
-			},
-			getLastAssistantText(): string | undefined {
-				return "done";
+				listener(createAssistantTurnEndEvent("done"));
+				listener(createAgentEndEvent("done"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
@@ -1074,6 +1237,10 @@ describe("telegram service", () => {
 
 		await running.done;
 		expect(fakeBot.sentTexts).toEqual([]);
+		const logsContent = readCapturedLogs();
+		expect(logsContent.includes('"source":"assistant","text":""')).toBe(
+			false
+		);
 	});
 
 	it("delivers deferred attachments with the final reply", async () => {
@@ -1082,17 +1249,21 @@ describe("telegram service", () => {
 		writeFileSync(attachmentPath, "report", "utf-8");
 		const messagingState = new PhiMessagingSessionState();
 
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
-			subscribe() {
-				return () => {};
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
 			},
 			async sendUserMessage(): Promise<void> {
 				messagingState.setDeferredMessage({
 					attachments: [{ path: attachmentPath, name: "report.txt" }],
 				});
-			},
-			getLastAssistantText(): string | undefined {
-				return "done";
+				listener?.(createAssistantTurnEndEvent("done"));
+				listener?.(createAgentEndEvent("done"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
@@ -1137,18 +1308,22 @@ describe("telegram service", () => {
 		writeFileSync(attachmentPath, "report", "utf-8");
 		const messagingState = new PhiMessagingSessionState();
 
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
-			subscribe() {
-				return () => {};
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
 			},
 			async sendUserMessage(): Promise<void> {
 				messagingState.setDeferredMessage({
 					text: "report attached",
 					attachments: [{ path: attachmentPath, name: "report.txt" }],
 				});
-			},
-			getLastAssistantText(): string | undefined {
-				return "NO_REPLY";
+				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
+				listener?.(createAgentEndEvent("NO_REPLY"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
@@ -1189,9 +1364,14 @@ describe("telegram service", () => {
 
 	it("renders mentions for the current sender", async () => {
 		const messagingState = new PhiMessagingSessionState();
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
-			subscribe() {
-				return () => {};
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
 			},
 			async sendUserMessage(): Promise<void> {
 				const sender = messagingState.getTurnContext()?.sender;
@@ -1203,9 +1383,8 @@ describe("telegram service", () => {
 					attachments: [],
 					mentions: [sender],
 				});
-			},
-			getLastAssistantText(): string | undefined {
-				return "NO_REPLY";
+				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
+				listener?.(createAgentEndEvent("NO_REPLY"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
@@ -1257,9 +1436,14 @@ describe("telegram service", () => {
 
 	it("fails fast when a mention has no telegram username", async () => {
 		const messagingState = new PhiMessagingSessionState();
+		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
-			subscribe() {
-				return () => {};
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listener = handler;
+				return () => {
+					listener = undefined;
+				};
 			},
 			async sendUserMessage(): Promise<void> {
 				const sender = messagingState.getTurnContext()?.sender;
@@ -1271,9 +1455,8 @@ describe("telegram service", () => {
 					attachments: [],
 					mentions: [sender],
 				});
-			},
-			getLastAssistantText(): string | undefined {
-				return "NO_REPLY";
+				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
+				listener?.(createAgentEndEvent("NO_REPLY"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;

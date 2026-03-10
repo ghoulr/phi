@@ -81,11 +81,10 @@ const app = tui({
 			createReloadRegistry(): ChatReloadRegistry {
 				return reloadRegistry;
 			},
-			startTelegramBot(runtime, config, chatExecutor) {
+			startTelegramBot(runtime, config) {
 				return startTelegramPollingBot(
 					runtime,
 					config,
-					chatExecutor,
 					undefined,
 					deliveryRegistry
 				);

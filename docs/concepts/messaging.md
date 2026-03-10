@@ -1,6 +1,7 @@
 # Messaging
 
-phi owns all messaging decisions. Routes only deliver resolved messages.
+phi owns route adaptation and visible delivery.
+pi owns prompt execution, queueing, and tool orchestration.
 
 Per-turn runtime context is defined in [system-reminder.md](/home/zhourui/workspace/phi/docs/concepts/system-reminder.md) and is persisted as a synthetic part on the current user message.
 
@@ -8,17 +9,18 @@ Per-turn runtime context is defined in [system-reminder.md](/home/zhourui/worksp
 
 | Kind | Delivery | Description |
 |------|----------|-------------|
-| **Final reply** | Turn end | Default assistant reply |
+| **Final reply** | Agent run end | Default assistant reply |
 | **Instant message** | Immediately | `send(instant: true)` — visible right away |
-| **Deferred message** | Turn end | `send(instant: false)` — committed with final reply |
-| **Status message** | When relevant | Progress/error notices (reload failure, cron, heartbeat) |
+| **Deferred message** | Agent run end | `send(instant: false)` — committed with final reply |
+| **Status message** | When relevant | Progress or error notices owned by phi |
 | **Silent result** | Never | Explicit suppression via `NO_REPLY` |
 
 ## Control Tokens
 
 ### `NO_REPLY`
 
-Suppress the final reply. Use when:
+Suppress the final reply.
+Use when:
 
 - a tool already sent the full answer
 - the turn only changed internal state
@@ -26,7 +28,8 @@ Suppress the final reply. Use when:
 
 ### `HEARTBEAT_OK`
 
-Explicit heartbeat acknowledgement. Resolved in phi, not in route.
+Explicit heartbeat acknowledgement.
+Resolved in phi, not in route.
 
 __Not used for now__
 
@@ -34,19 +37,20 @@ __Not used for now__
 
 Order:
 
-1. Instant messages delivered immediately
-2. Deferred parts stored as turn draft
-3. Final reply inspected
-4. Delivery decided
+1. Instant messages delivered immediately.
+2. Deferred parts stored as turn draft.
+3. Final reply inspected.
+4. Delivery decided.
 
 Rules:
 
-- Normal text → deliver as final reply
-- `NO_REPLY` → suppress final reply
-- Deferred draft exists → commit at turn end
-- Tool sent full answer via `instant: true` → agent ends with `NO_REPLY`
+- Normal text → deliver as final reply.
+- `NO_REPLY` → suppress final reply.
+- Deferred draft exists → commit when the active agent run ends.
+- Tool sent full answer via `instant: true` → agent ends with `NO_REPLY`.
 
-Never infer that two texts are "probably the same message". Keep it explicit.
+Never infer that two texts are probably the same message.
+Keep it explicit.
 
 ## `send` Tool
 
@@ -61,11 +65,11 @@ Input:
 
 Rules:
 
-- `text` and `attachments` cannot both be empty
-- one turn can hold at most one deferred draft
-- a deferred draft only stores message parts, not control tokens
-- invalid input is an error
-- reply behavior is explicit, not implicit
+- `text` and `attachments` cannot both be empty.
+- One turn can hold at most one deferred draft.
+- A deferred draft only stores message parts, not control tokens.
+- Invalid input is an error.
+- Reply behavior is explicit agent output, not route policy.
 
 ### `instant: true`
 
@@ -84,27 +88,34 @@ Stored as the pending outbound draft.
 Rules:
 
 - not delivered immediately
-- committed at turn end
+- committed when the active agent run ends
 - combined with the final reply when one exists
 - if the final reply is `NO_REPLY`, the draft is delivered alone
 
 ## Pending Outbound Draft
 
-Turn-scoped, chat-scoped. Committed at turn end, discarded on failure. Invalid state is an error.
+Turn-scoped and chat-scoped.
+Committed when the active agent run ends.
+Discarded on failure.
+Invalid state is an error.
+
+## Session Bridge Boundary
+
+See `docs/concepts/chat-session-bridge.md`.
 
 ## Cron and Background Runs
 
-Same rules apply. A cron run produces a normal result, an error notice, or a silent result (`NO_REPLY`). Failures that affect user-visible behavior must notify the user.
+Same rules apply.
+A cron run produces a normal result, an error notice, or a silent result (`NO_REPLY`).
+Failures that affect user-visible behavior must notify the user.
 
 ## Route Responsibility
 
-Routes handle: text/media send, reply target, platform rendering limits.
-
-Routes do NOT decide: whether a token means silence, whether heartbeat acks are hidden, whether cron output is announced.
+Routes handle text or media send, typing indicators, and platform rendering limits.
+Routes do not decide whether a token means silence, whether a message should mention the sender, or whether a reply should exist.
 
 ## Boundary with pi
 
 - pi runs the agent
-- phi decides what the user sees
-
-Control tokens, turn resolution, draft handling, cron publication, heartbeat suppression — all phi-owned.
+- phi adapts routes and delivers visible output
+- Control tokens, turn resolution, deferred drafts, cron publication — all phi-owned.

@@ -1,6 +1,5 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import {
-	applyPhiTurnContext,
 	resolvePhiTurnOutput,
 	type ResolvePhiTurnOutputParams,
 } from "@phi/messaging/resolve-turn-output";
@@ -9,31 +8,31 @@ import type { PhiMessage } from "@phi/messaging/types";
 
 export class PhiMessagingSessionState {
 	private deferredMessage: PhiMessage | undefined;
-	private turnContext: PhiTurnContext | undefined;
-
-	public resetTurn(): void {
-		this.deferredMessage = undefined;
-		this.turnContext = undefined;
-	}
+	private readonly turnContexts: PhiTurnContext[] = [];
 
 	public startTurn(context: PhiTurnContext | undefined): void {
-		this.deferredMessage = undefined;
-		this.turnContext = context;
+		this.turnContexts.push(context ?? {});
 	}
 
-	public prepareMessage(message: PhiMessage): PhiMessage {
-		return applyPhiTurnContext(message, this.turnContext);
+	public discardLastTurn(): void {
+		if (this.turnContexts.length === 0) {
+			return;
+		}
+		this.turnContexts.pop();
+		if (this.turnContexts.length === 0) {
+			this.deferredMessage = undefined;
+		}
 	}
 
 	public getTurnContext(): PhiTurnContext | undefined {
-		return this.turnContext;
+		return this.turnContexts.at(-1);
 	}
 
 	public setDeferredMessage(message: PhiMessage): void {
 		if (this.deferredMessage) {
 			throw new Error("Only one deferred send is allowed per turn.");
 		}
-		this.deferredMessage = this.prepareMessage(message);
+		this.deferredMessage = message;
 	}
 
 	public consumeResolvedTurnOutput(
@@ -41,13 +40,17 @@ export class PhiMessagingSessionState {
 	): PhiMessage[] {
 		const deferredMessage = this.deferredMessage;
 		this.deferredMessage = undefined;
-		const turnContext = this.turnContext;
-		this.turnContext = undefined;
+		this.turnContexts.length = 0;
 		return resolvePhiTurnOutput({
 			...params,
 			deferredMessage,
-			turnContext,
 		});
+	}
+
+	public hasPendingOutput(): boolean {
+		return (
+			this.turnContexts.length > 0 || this.deferredMessage !== undefined
+		);
 	}
 }
 

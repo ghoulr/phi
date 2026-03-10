@@ -38,8 +38,7 @@ export interface ServiceCommandDependencies {
 	createReloadRegistry(): ChatReloadRegistry;
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig,
-		chatExecutor: ChatExecutor
+		config: ResolvedTelegramPollingBotConfig
 	): Promise<RunningTelegramPollingBot>;
 	startCronRuntime(
 		runtime: ChatSessionRuntime<AgentSession>,
@@ -67,10 +66,9 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	},
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig,
-		chatExecutor: ChatExecutor
+		config: ResolvedTelegramPollingBotConfig
 	): Promise<RunningTelegramPollingBot> {
-		return startTelegramPollingBot(runtime, config, chatExecutor);
+		return startTelegramPollingBot(runtime, config);
 	},
 	startCronRuntime(
 		runtime: ChatSessionRuntime<AgentSession>,
@@ -168,8 +166,7 @@ export async function runServiceCommand(
 			});
 			const runningBot = await resolvedDependencies.startTelegramBot(
 				runtime,
-				botConfig,
-				chatExecutor
+				botConfig
 			);
 			runningServices.push(runningBot);
 			log.info("service.telegram.started", {
