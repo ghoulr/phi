@@ -2,10 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
-import type {
-	AgentSession,
-	AgentSessionEvent,
-} from "@mariozechner/pi-coding-agent";
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { Bot, type BotError, type Context, InputFile } from "grammy";
 import type {
 	ExternalReplyInfo,
@@ -13,14 +10,7 @@ import type {
 	MessageOrigin,
 } from "@grammyjs/types";
 
-import {
-	InMemoryChatExecutor,
-	type ChatExecutor,
-} from "@phi/core/chat-executor";
-import {
-	appendChatLogEntry,
-	hasOutboundChatLogEntry,
-} from "@phi/core/chat-log";
+import { appendChatLogEntry } from "@phi/core/chat-log";
 import {
 	ensureChatWorkspaceLayout,
 	getChatInboxDirectoryPath,
@@ -34,10 +24,6 @@ import {
 } from "@phi/core/message-text";
 import type { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
 import {
-	getPhiMessagingSessionState,
-	resolvePhiSessionTurnOutput,
-} from "@phi/messaging/session-state";
-import {
 	appendPhiSystemReminderToUserContent,
 	buildPhiSystemReminder,
 } from "@phi/messaging/system-reminder";
@@ -46,16 +32,15 @@ import type {
 	PhiMessageAttachment,
 	PhiMessageMention,
 } from "@phi/messaging/types";
-import type { PhiTurnContext } from "@phi/messaging/turn-context";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
 import {
 	formatUserFacingErrorMessage,
 	normalizeUnknownError,
 } from "@phi/core/user-error";
+import { ChatSessionBridge } from "@phi/services/chat-session-bridge";
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
-const TYPING_INTERVAL_MS = 2500;
 
 const log = getPhiLogger("telegram");
 
@@ -82,7 +67,6 @@ export interface TelegramTextMessageContext {
 		sender?: PhiMessageMention;
 		systemReminderMetadata?: Record<string, unknown>;
 	};
-	reply(text: string): Promise<unknown>;
 	sendTyping(): Promise<unknown>;
 }
 
@@ -139,6 +123,13 @@ function createTelegramIdempotencyKey(
 	updateId: number
 ): string {
 	return `telegram:${telegramChatId}:${String(updateId)}`;
+}
+
+function createTelegramRunIdempotencyKey(
+	telegramChatId: string,
+	runId: number
+): string {
+	return `telegram-run:${telegramChatId}:${String(runId)}`;
 }
 
 function normalizeTelegramChatId(value: number | string): string {
@@ -593,62 +584,6 @@ async function buildTelegramInboundAgentContent(params: {
 	);
 }
 
-function shouldShowTypingForEvent(event: AgentSessionEvent): boolean {
-	if (event.type !== "message_update") {
-		return false;
-	}
-	if (event.message.role !== "assistant") {
-		return false;
-	}
-
-	switch (event.assistantMessageEvent.type) {
-		case "thinking_start":
-		case "thinking_delta":
-		case "thinking_end":
-		case "text_start":
-		case "text_delta":
-		case "text_end":
-			return true;
-		default:
-			return false;
-	}
-}
-
-function createTypingNotifier(sendTyping: () => Promise<unknown>): {
-	notify(): void;
-	stop(): void;
-} {
-	let stopped = false;
-	let sending = false;
-	let lastSentAt = 0;
-
-	return {
-		notify(): void {
-			if (stopped || sending) {
-				return;
-			}
-			if (Date.now() - lastSentAt < TYPING_INTERVAL_MS) {
-				return;
-			}
-
-			sending = true;
-			void sendTyping().then(
-				() => {
-					sending = false;
-					lastSentAt = Date.now();
-				},
-				() => {
-					sending = false;
-					lastSentAt = Date.now();
-				}
-			);
-		},
-		stop(): void {
-			stopped = true;
-		},
-	};
-}
-
 async function replyTextInChunks(
 	bot: Pick<TelegramPollingBot, "sendText">,
 	chatId: string,
@@ -765,15 +700,9 @@ async function deliverTelegramMessage(
 		if (!renderedText) {
 			throw new Error("Telegram outbound message is empty.");
 		}
-		await replyTextInChunks(
-			bot,
-			chatId,
-			renderedText,
-			message.replyToMessageId
-		);
+		await replyTextInChunks(bot, chatId, renderedText);
 		log.debug("telegram.message.delivered", {
 			telegramChatId: chatId,
-			replyToMessageId: message.replyToMessageId,
 			attachmentCount: 0,
 			textLength: renderedText.length,
 		});
@@ -789,28 +718,16 @@ async function deliverTelegramMessage(
 		sanitizedText.length <= TELEGRAM_CAPTION_LIMIT;
 
 	if (sanitizedText && !canUseCaption) {
-		await replyTextInChunks(
-			bot,
-			chatId,
-			sanitizedText,
-			message.replyToMessageId
-		);
+		await replyTextInChunks(bot, chatId, sanitizedText);
 	}
 
 	for (const [index, attachment] of message.attachments.entries()) {
 		const caption =
 			index === 0 && canUseCaption ? sanitizedText : undefined;
-		await sendTelegramAttachment(
-			bot,
-			chatId,
-			attachment,
-			caption,
-			message.replyToMessageId
-		);
+		await sendTelegramAttachment(bot, chatId, attachment, caption);
 	}
 	log.debug("telegram.message.delivered", {
 		telegramChatId: chatId,
-		replyToMessageId: message.replyToMessageId,
 		attachmentCount: message.attachments.length,
 		textLength: sanitizedText?.length,
 	});
@@ -818,6 +735,7 @@ async function deliverTelegramMessage(
 
 class GrammyPollingBot implements TelegramPollingBot {
 	private readonly bot: Bot;
+	private detachedErrorHandler: ((error: unknown) => void) | undefined;
 
 	public constructor(token: string) {
 		this.bot = new Bot(token);
@@ -873,7 +791,7 @@ class GrammyPollingBot implements TelegramPollingBot {
 			if (!text && attachments.length === 0) {
 				return;
 			}
-			await handler({
+			const messageContext: TelegramTextMessageContext = {
 				updateId: context.update.update_id,
 				chat: { id: chat.id },
 				message: {
@@ -883,17 +801,25 @@ class GrammyPollingBot implements TelegramPollingBot {
 					sender: buildTelegramSenderMention(message.from),
 					systemReminderMetadata,
 				},
-				reply: async (text: string) => {
-					return context.reply(text);
-				},
 				sendTyping: async () => {
 					return context.api.sendChatAction(chat.id, "typing");
 				},
+			};
+			void handler(messageContext).catch((error: unknown) => {
+				const detachedErrorHandler = this.detachedErrorHandler;
+				if (detachedErrorHandler) {
+					detachedErrorHandler(error);
+					return;
+				}
+				queueMicrotask(() => {
+					throw error;
+				});
 			});
 		});
 	}
 
 	public onError(handler: (error: unknown) => void): void {
+		this.detachedErrorHandler = handler;
 		this.bot.catch((error: BotError<Context>) => {
 			handler(error.error);
 		});
@@ -980,99 +906,95 @@ const defaultTelegramServiceDependencies: TelegramServiceDependencies = {
 	},
 };
 
-async function processTelegramAgentTurn(
-	runtime: ChatSessionRuntime<AgentSession>,
-	bot: Pick<TelegramPollingBot, "downloadFile">,
-	target: TelegramRouteTarget,
-	context: TelegramTextMessageContext
-): Promise<PhiMessage[]> {
-	const turnStartedAt = Date.now();
-	const telegramChatId = normalizeTelegramChatId(context.chat.id);
-	const telegramMessageId = normalizeTelegramMessageId(context.message.id);
-	const telegramUpdateId = normalizeTelegramUpdateId(context.updateId);
-	const turnContext: PhiTurnContext = {
-		currentMessageId: telegramMessageId,
-		sender: context.message.sender,
-	};
-	log.info("telegram.turn.started", {
-		chatId: target.chatId,
-		telegramChatId,
-		telegramMessageId,
-		telegramUpdateId,
-		attachmentCount: context.message.attachments.length,
-		textLength: context.message.text?.length,
-	});
-	const inboundContent = await buildTelegramInboundAgentContent({
-		bot,
-		workspaceDir: resolveChatWorkspaceDirectory(target.workspace),
-		chatId: target.chatId,
-		telegramChatId,
-		context,
-		systemReminderMetadata: context.message.systemReminderMetadata,
-	});
-
-	const session = await runtime.getOrCreateSession(target.chatId);
-	getPhiMessagingSessionState(session)?.startTurn(turnContext);
-	const typingNotifier = createTypingNotifier(context.sendTyping);
-	const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-		if (shouldShowTypingForEvent(event)) {
-			typingNotifier.notify();
-		}
-	});
-
-	try {
-		typingNotifier.notify();
-		await session.sendUserMessage(inboundContent);
-	} finally {
-		unsubscribe();
-		typingNotifier.stop();
-	}
-
-	const assistantText = session.getLastAssistantText();
-	if (!assistantText) {
-		throw new Error(
-			`Assistant returned empty response for chat ${target.chatId}`
-		);
-	}
-
-	const outboundMessages = resolvePhiSessionTurnOutput(
-		session,
-		assistantText
-	);
-	log.info("telegram.turn.completed", {
-		chatId: target.chatId,
-		telegramChatId,
-		telegramMessageId,
-		telegramUpdateId,
-		outboundMessageCount: outboundMessages.length,
-		durationMs: Date.now() - turnStartedAt,
-	});
-	return outboundMessages;
+interface TelegramBridgeRouteState {
+	nextRunId: number;
+	readonly processedInboundKeys: Set<string>;
 }
 
-async function handleTelegramTextMessage(
-	runtime: ChatSessionRuntime<AgentSession>,
+async function handleResolvedTelegramRun(
 	bot: TelegramPollingBot,
-	chatRoutes: Record<string, TelegramRouteTarget>,
-	context: TelegramTextMessageContext
+	target: TelegramRouteTarget,
+	telegramChatId: string,
+	state: TelegramBridgeRouteState,
+	outboundMessages: PhiMessage[]
+): Promise<void> {
+	const runId = state.nextRunId;
+	state.nextRunId += 1;
+	const outboundIdempotencyKey = createTelegramRunIdempotencyKey(
+		telegramChatId,
+		runId
+	);
+
+	try {
+		if (outboundMessages.length === 0) {
+			log.debug("telegram.run.no_visible_output", {
+				chatId: target.chatId,
+				telegramChatId,
+				runId,
+			});
+			log.info("telegram.run.completed", {
+				chatId: target.chatId,
+				telegramChatId,
+				runId,
+				outboundMessageCount: 0,
+			});
+			return;
+		}
+
+		for (const message of outboundMessages) {
+			await deliverTelegramMessage(bot, telegramChatId, message);
+		}
+		appendChatLogEntry({
+			idempotencyKey: outboundIdempotencyKey,
+			channel: "telegram",
+			chatId: target.chatId,
+			telegramChatId,
+			direction: "outbound",
+			source: "assistant",
+			text: buildTelegramOutboundLogText(outboundMessages),
+		});
+		log.info("telegram.run.completed", {
+			chatId: target.chatId,
+			telegramChatId,
+			runId,
+			outboundMessageCount: outboundMessages.length,
+		});
+	} catch (error: unknown) {
+		log.error("telegram.run.failed", {
+			chatId: target.chatId,
+			telegramChatId,
+			runId,
+			err: normalizeUnknownError(error),
+		});
+		const errorText = formatUserFacingErrorMessage(error);
+		await replyTextInChunks(bot, telegramChatId, errorText);
+		appendChatLogEntry({
+			idempotencyKey: outboundIdempotencyKey,
+			channel: "telegram",
+			chatId: target.chatId,
+			telegramChatId,
+			direction: "outbound",
+			source: "error",
+			text: errorText,
+		});
+	}
+}
+
+async function submitTelegramTextMessage(
+	bridge: ChatSessionBridge,
+	bot: TelegramPollingBot,
+	target: TelegramRouteTarget,
+	context: TelegramTextMessageContext,
+	state: TelegramBridgeRouteState
 ): Promise<void> {
 	const startedAt = Date.now();
 	const telegramChatId = normalizeTelegramChatId(context.chat.id);
-	const target = chatRoutes[telegramChatId];
-	if (!target) {
-		throw new Error(
-			`No agent configured for telegram chat id: ${telegramChatId}`
-		);
-	}
-
-	const workspaceDir = resolveChatWorkspaceDirectory(target.workspace);
-	ensureChatWorkspaceLayout(workspaceDir);
+	const telegramUpdateId = normalizeTelegramUpdateId(context.updateId);
+	const telegramMessageId = normalizeTelegramMessageId(context.message.id);
 	const idempotencyKey = createTelegramIdempotencyKey(
 		telegramChatId,
 		context.updateId
 	);
-	const telegramUpdateId = normalizeTelegramUpdateId(context.updateId);
-	const telegramMessageId = normalizeTelegramMessageId(context.message.id);
 	log.info("telegram.message.received", {
 		chatId: target.chatId,
 		telegramChatId,
@@ -1082,7 +1004,7 @@ async function handleTelegramTextMessage(
 		attachmentCount: context.message.attachments.length,
 		textLength: context.message.text?.length,
 	});
-	if (hasOutboundChatLogEntry(idempotencyKey)) {
+	if (state.processedInboundKeys.has(idempotencyKey)) {
 		log.warn("telegram.message.duplicate_skipped", {
 			chatId: target.chatId,
 			telegramChatId,
@@ -1104,17 +1026,30 @@ async function handleTelegramTextMessage(
 		source: "user",
 		text: buildTelegramInboundLogText(context.message),
 	});
+	state.processedInboundKeys.add(idempotencyKey);
 
-	let outboundMessages: PhiMessage[];
-	let outboundSource: "assistant" | "error" = "assistant";
-
+	const inboundContent = await buildTelegramInboundAgentContent({
+		bot,
+		workspaceDir: resolveChatWorkspaceDirectory(target.workspace),
+		chatId: target.chatId,
+		telegramChatId,
+		context,
+		systemReminderMetadata: context.message.systemReminderMetadata,
+	});
 	try {
-		outboundMessages = await processTelegramAgentTurn(
-			runtime,
-			bot,
-			target,
-			context
-		);
+		await bridge.submit({
+			content: inboundContent,
+			sender: context.message.sender,
+			sendTyping: context.sendTyping,
+		});
+		log.info("telegram.message.completed", {
+			chatId: target.chatId,
+			telegramChatId,
+			telegramUpdateId,
+			telegramMessageId,
+			idempotencyKey,
+			durationMs: Date.now() - startedAt,
+		});
 	} catch (error: unknown) {
 		log.error("telegram.message.failed", {
 			chatId: target.chatId,
@@ -1125,60 +1060,45 @@ async function handleTelegramTextMessage(
 			durationMs: Date.now() - startedAt,
 			err: normalizeUnknownError(error),
 		});
-		outboundMessages = [
-			{
-				text: formatUserFacingErrorMessage(error),
-				attachments: [],
-				replyToMessageId: telegramMessageId,
-			},
-		];
-		outboundSource = "error";
+		state.processedInboundKeys.delete(idempotencyKey);
+		const errorText = formatUserFacingErrorMessage(error);
+		await replyTextInChunks(
+			bot,
+			telegramChatId,
+			errorText,
+			telegramMessageId
+		);
+		appendChatLogEntry({
+			idempotencyKey,
+			channel: "telegram",
+			chatId: target.chatId,
+			telegramChatId,
+			telegramUpdateId,
+			telegramMessageId,
+			direction: "outbound",
+			source: "error",
+			text: errorText,
+		});
+		log.info("telegram.message.completed", {
+			chatId: target.chatId,
+			telegramChatId,
+			telegramUpdateId,
+			telegramMessageId,
+			idempotencyKey,
+			durationMs: Date.now() - startedAt,
+		});
 	}
-
-	for (const message of outboundMessages) {
-		await deliverTelegramMessage(bot, telegramChatId, message);
-	}
-	appendChatLogEntry({
-		idempotencyKey,
-		channel: "telegram",
-		chatId: target.chatId,
-		telegramChatId,
-		telegramUpdateId,
-		telegramMessageId,
-		direction: "outbound",
-		source: outboundSource,
-		text: buildTelegramOutboundLogText(outboundMessages),
-	});
-	log.info("telegram.message.completed", {
-		chatId: target.chatId,
-		telegramChatId,
-		telegramUpdateId,
-		telegramMessageId,
-		idempotencyKey,
-		outboundSource,
-		outboundMessageCount: outboundMessages.length,
-		durationMs: Date.now() - startedAt,
-	});
 }
 
 export async function startTelegramPollingBot(
 	runtime: ChatSessionRuntime<AgentSession>,
 	config: ResolvedTelegramPollingBotConfig,
-	chatExecutorOrDependencies:
-		| ChatExecutor
-		| TelegramServiceDependencies = new InMemoryChatExecutor(),
-	dependenciesArg: TelegramServiceDependencies = defaultTelegramServiceDependencies,
+	dependencies: TelegramServiceDependencies = defaultTelegramServiceDependencies,
 	deliveryRegistry?: PhiRouteDeliveryRegistry
 ): Promise<RunningTelegramPollingBot> {
-	const chatExecutor =
-		"run" in chatExecutorOrDependencies
-			? chatExecutorOrDependencies
-			: new InMemoryChatExecutor();
-	const dependencies =
-		"run" in chatExecutorOrDependencies
-			? dependenciesArg
-			: chatExecutorOrDependencies;
 	const bot = dependencies.createBot(config.token);
+	const bridges = new Map<string, ChatSessionBridge>();
+	const bridgeStates = new Map<string, TelegramBridgeRouteState>();
 	log.info("telegram.bot.starting", {
 		routeCount: Object.keys(config.chatRoutes).length,
 		chatIds: Object.values(config.chatRoutes).map(
@@ -1213,34 +1133,67 @@ export async function startTelegramPollingBot(
 
 	bot.onTextMessage(async (context: TelegramTextMessageContext) => {
 		const telegramChatId = normalizeTelegramChatId(context.chat.id);
-		const queueKey =
-			config.chatRoutes[telegramChatId]?.chatId ?? telegramChatId;
-		await chatExecutor.run(queueKey, async () => {
-			try {
-				await handleTelegramTextMessage(
-					runtime,
-					bot,
-					config.chatRoutes,
-					context
-				);
-			} catch (error: unknown) {
-				log.error("telegram.message.unhandled_failure", {
-					telegramChatId,
-					telegramUpdateId: normalizeTelegramUpdateId(
-						context.updateId
-					),
-					telegramMessageId: normalizeTelegramMessageId(
-						context.message.id
-					),
-					err: normalizeUnknownError(error),
-				});
-				await replyTextInChunks(
-					bot,
-					telegramChatId,
-					formatUserFacingErrorMessage(error)
+		try {
+			const target = config.chatRoutes[telegramChatId];
+			if (!target) {
+				throw new Error(
+					`No agent configured for telegram chat id: ${telegramChatId}`
 				);
 			}
-		});
+			const workspaceDir = resolveChatWorkspaceDirectory(
+				target.workspace
+			);
+			ensureChatWorkspaceLayout(workspaceDir);
+			let bridge = bridges.get(target.chatId);
+			if (!bridge) {
+				const routeState: TelegramBridgeRouteState = {
+					nextRunId: 0,
+					processedInboundKeys: new Set<string>(),
+				};
+				bridgeStates.set(target.chatId, routeState);
+				bridge = new ChatSessionBridge(runtime, target.chatId, {
+					onResolved: async (outboundMessages) =>
+						await handleResolvedTelegramRun(
+							bot,
+							target,
+							telegramChatId,
+							routeState,
+							outboundMessages
+						),
+				});
+				bridges.set(target.chatId, bridge);
+			}
+			const routeState = bridgeStates.get(target.chatId);
+			if (!routeState) {
+				throw new Error(
+					`Missing telegram bridge state for chat ${target.chatId}`
+				);
+			}
+			await submitTelegramTextMessage(
+				bridge,
+				bot,
+				target,
+				context,
+				routeState
+			);
+		} catch (error: unknown) {
+			log.error("telegram.message.unhandled_failure", {
+				telegramChatId,
+				telegramUpdateId: normalizeTelegramUpdateId(context.updateId),
+				telegramMessageId: normalizeTelegramMessageId(
+					context.message.id
+				),
+				err: normalizeUnknownError(error),
+			});
+			await replyTextInChunks(
+				bot,
+				telegramChatId,
+				formatUserFacingErrorMessage(error),
+				config.chatRoutes[telegramChatId]
+					? normalizeTelegramMessageId(context.message.id)
+					: undefined
+			);
+		}
 	});
 
 	const done = bot
@@ -1266,8 +1219,8 @@ export async function startTelegramPollingBot(
 			for (const unregister of unregisterDeliveries) {
 				unregister();
 			}
-			for (const target of Object.values(config.chatRoutes)) {
-				runtime.disposeSession(target.chatId);
+			for (const bridge of bridges.values()) {
+				bridge.dispose();
 			}
 		});
 

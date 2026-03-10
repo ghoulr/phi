@@ -10,7 +10,6 @@ import type { AssistantMessage } from "@mariozechner/pi-ai";
 
 import { InMemoryChatExecutor } from "@phi/core/chat-executor";
 import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
-import { resetChatLogStateForTest } from "@phi/core/chat-log";
 import {
 	resetPhiLoggerForTest,
 	setPhiLoggerSettingsForTest,
@@ -99,7 +98,6 @@ function createAssistantMessage(text: string): AssistantMessage {
 }
 
 afterEach(() => {
-	resetChatLogStateForTest();
 	resetPhiLoggerForTest();
 	logOutput = "";
 	logCaptureConfigured = false;

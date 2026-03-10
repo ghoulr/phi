@@ -26,7 +26,7 @@ const TOOL_DESCRIPTION_MAP: Record<string, string> = {
 	edit: "Make surgical edits to files (exact text replacement)",
 	write: "Create or overwrite files",
 	reload: "Recreate the current chat session from workspace files",
-	send: "Send a user-visible message immediately or stage it for turn end",
+	send: "Send a user-visible message immediately or stage it for your final output",
 	grep: "Search file contents for patterns",
 	find: "Find files by glob pattern",
 	ls: "List directory contents",

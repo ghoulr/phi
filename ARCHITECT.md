@@ -47,8 +47,14 @@ The agent edits these with normal file tools and calls `reload` to apply.
 ## Runtime shape
 
 ```text
-Service → Runtime → Chat → pi session
+Service → Route adapter → ChatSessionBridge → pi session
 ```
+
+Service chats use one bridge per chat.
+The bridge owns session lifecycle, route adaptation, system reminders, and output routing.
+The bridge does not reimplement pi queueing or command parsing.
+
+See `docs/concepts/chat-session-bridge.md`.
 
 ## Storage
 
@@ -98,6 +104,7 @@ Before session switch and compaction, phi runs an invisible maintenance turn to 
 - `src/extensions/system-prompt/` — prompt builder
 - `src/extensions/memory-maintenance/` — memory maintenance
 - `src/core/` — runtime infrastructure
+- `src/services/` — route adapters and chat session bridges
 
 ## Cron
 
@@ -105,7 +112,7 @@ Chat-scoped cron system. Details in `docs/concepts/cron.md`.
 Cron config lives in `<workspace>/.phi/config.yaml`.
 
 ```text
-Service → Runtime → ChatExecutor → pi session
+Service → Route adapter → ChatSessionBridge → pi session
 Cron → CronExecutor
               ^
 Cron publish ─|
@@ -116,7 +123,7 @@ Job state lives under the chat workspace, not in global state.
 ## Reload
 
 `reload` is a chat-scoped tool with no parameters.
-It recreates the current session from workspace files.
+It invalidates the current session; the bridge recreates it on the next submit.
 
 ## Failure strategy
 

@@ -1,10 +1,11 @@
 # System Reminder
 
-Per-turn metadata persisted as a synthetic part on the current user message. It is sent to the model as part of that user turn and stays in session history.
+Per-turn metadata is persisted as a synthetic part on the current user message.
+It is sent to the model as part of that user turn and stays in session history.
 
 ## What it carries
 
-Message metadata the agent needs but the user didn't type.
+Background the agent needs but the user did not type.
 
 ## Shape
 
@@ -36,10 +37,16 @@ two test files
 
 ## Rules
 
-- Built by phi and attached to the current user message as a synthetic part
-- The user message body is sent separately; `system_reminder` only carries metadata
-- Keep Telegram field names when possible
-- Keep the outer `<system-reminder>` markers stable
-- The inner content is simple markdown
-- Text-like metadata such as `text` or `caption` is wrapped in fenced code blocks
-- Remove null, undefined, and empty fields
+- Built by phi and attached to the current user message.
+- The user message body is sent separately.
+- Carries background, not delivery policy.
+- Keep Telegram field names when possible.
+- Keep the outer `<system-reminder>` markers stable.
+- Keep the inner content simple markdown.
+- Wrap text-like metadata such as `text` or `caption` in fenced code blocks.
+- Remove null, undefined, and empty fields.
+
+## Boundary
+
+- Bridge provides transport background via `system-reminder`.
+- Agent decides reply behavior; route does not infer it.

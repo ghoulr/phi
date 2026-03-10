@@ -1,11 +1,9 @@
 import { isNoReplyToken } from "@phi/messaging/control-tokens";
-import type { PhiTurnContext } from "@phi/messaging/turn-context";
 import type { PhiMessage } from "@phi/messaging/types";
 
 export interface ResolvePhiTurnOutputParams {
 	assistantText: string | undefined;
 	deferredMessage?: PhiMessage;
-	turnContext?: PhiTurnContext;
 }
 
 function normalizeText(text: string | undefined): string | undefined {
@@ -29,30 +27,11 @@ function mergeMessageText(
 function createResolvedMessage(params: {
 	text: string | undefined;
 	deferredMessage?: PhiMessage;
-	turnContext?: PhiTurnContext;
 }): PhiMessage {
-	return applyPhiTurnContext(
-		{
-			text: params.text,
-			attachments: params.deferredMessage?.attachments ?? [],
-			mentions: params.deferredMessage?.mentions,
-			replyToMessageId: params.deferredMessage?.replyToMessageId,
-		},
-		params.turnContext
-	);
-}
-
-export function applyPhiTurnContext(
-	message: PhiMessage,
-	turnContext: PhiTurnContext | undefined
-): PhiMessage {
-	if (!turnContext?.replyToMessageId) {
-		return message;
-	}
 	return {
-		...message,
-		replyToMessageId:
-			message.replyToMessageId ?? turnContext.replyToMessageId,
+		text: params.text,
+		attachments: params.deferredMessage?.attachments ?? [],
+		mentions: params.deferredMessage?.mentions,
 	};
 }
 
@@ -71,7 +50,6 @@ export function resolvePhiTurnOutput(
 			createResolvedMessage({
 				text: deferredText,
 				deferredMessage: params.deferredMessage,
-				turnContext: params.turnContext,
 			}),
 		];
 	}
@@ -85,7 +63,6 @@ export function resolvePhiTurnOutput(
 		createResolvedMessage({
 			text: mergedText,
 			deferredMessage: params.deferredMessage,
-			turnContext: params.turnContext,
 		}),
 	];
 }

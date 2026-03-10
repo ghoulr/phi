@@ -108,7 +108,6 @@ describe("createPhiMessagingExtension", () => {
 		const workspace = createWorkspace();
 		const harness = createHarness(workspace);
 		harness.state.startTurn({
-			replyToMessageId: "10",
 			sender: {
 				userId: "100",
 				username: "alice",
@@ -131,7 +130,6 @@ describe("createPhiMessagingExtension", () => {
 			{
 				text: "done",
 				attachments: [],
-				replyToMessageId: "10",
 				mentions: [
 					{
 						userId: "100",
@@ -171,9 +169,7 @@ describe("createPhiMessagingExtension", () => {
 		const workspace = createWorkspace();
 		writeFileSync(join(workspace, "report.txt"), "hello", "utf-8");
 		const harness = createHarness(workspace);
-		harness.state.startTurn({
-			replyToMessageId: "10",
-		});
+		harness.state.startTurn(undefined);
 
 		await harness.tool?.execute(
 			"call-1",
@@ -199,13 +195,12 @@ describe("createPhiMessagingExtension", () => {
 						name: "report.txt",
 					},
 				],
-				replyToMessageId: "10",
 			},
 		]);
 	});
 
 	it("exposes control token guidance for the system prompt", () => {
 		expect(buildPhiMessagingEventText()).toContain("NO_REPLY");
-		expect(buildPhiMessagingEventText()).toContain("reply");
+		expect(buildPhiMessagingEventText()).toContain("End with exact");
 	});
 });

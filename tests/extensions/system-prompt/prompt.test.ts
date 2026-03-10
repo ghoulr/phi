@@ -193,12 +193,12 @@ describe("buildPhiSystemPrompt", () => {
 				memoryFilePath: filePath,
 				toolNames: ["read", "send"],
 				eventText:
-					"- Reply with exact `NO_REPLY` when send already delivered the full answer.",
+					"- End with exact `NO_REPLY` when send already delivered everything the user should see.",
 			});
 
 			expect(
 				prompt.includes(
-					"- send: Send a user-visible message immediately or stage it for turn end"
+					"- send: Send a user-visible message immediately or stage it for agent run end"
 				)
 			).toBe(true);
 			expect(prompt.includes("not user-authored input")).toBe(true);
@@ -213,7 +213,7 @@ describe("buildPhiSystemPrompt", () => {
 			expect(prompt.includes("## Events & Replies")).toBe(false);
 			expect(
 				prompt.includes(
-					"If send already delivered the full answer immediately, reply with exact NO_REPLY."
+					"If send already delivered everything the user should see immediately, end with exact NO_REPLY."
 				)
 			).toBe(false);
 		} finally {

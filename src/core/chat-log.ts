@@ -9,19 +9,14 @@ export interface ChatLogEntry {
 	channel: "telegram";
 	chatId: string;
 	telegramChatId: string;
-	telegramUpdateId: string;
-	telegramMessageId: string;
+	telegramUpdateId?: string;
+	telegramMessageId?: string;
 	direction: ChatLogDirection;
 	source: ChatLogSource;
 	text: string;
 }
 
-const deliveredOutboundIdempotencyKeys = new Set<string>();
-
 export function appendChatLogEntry(entry: ChatLogEntry): void {
-	if (entry.direction === "outbound") {
-		deliveredOutboundIdempotencyKeys.add(entry.idempotencyKey);
-	}
 	appendStructuredLogEntry({
 		tag: entry.channel,
 		event: "telegram.message",
@@ -29,12 +24,4 @@ export function appendChatLogEntry(entry: ChatLogEntry): void {
 		message: `telegram ${entry.direction} message`,
 		...entry,
 	});
-}
-
-export function hasOutboundChatLogEntry(idempotencyKey: string): boolean {
-	return deliveredOutboundIdempotencyKeys.has(idempotencyKey);
-}
-
-export function resetChatLogStateForTest(): void {
-	deliveredOutboundIdempotencyKeys.clear();
 }

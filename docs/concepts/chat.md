@@ -23,12 +23,13 @@ A service chat owns:
 
 `config.yaml` holds chat-local settings and cron metadata.
 
-See `docs/concepts/workspace-config.md` for workspace config details.
+A service chat runs through a chat-scoped session bridge.
+
+See `docs/concepts/chat-session-bridge.md` and `docs/concepts/workspace-config.md`.
 
 ## TUI chat
 
 TUI is a special chat with a global state root at `~/.phi/pi`.
-
 The current working directory is only working context, not the phi state root.
 TUI does not use `<cwd>/.phi` as its phi home.
 
@@ -36,3 +37,4 @@ TUI does not use `<cwd>/.phi` as its phi home.
 
 phi reuses pi infrastructure.
 TUI state lives under `~/.phi/pi` but follows phi behavior (system prompt, memory rules, maintenance).
+Service chats also reuse pi sessions, but the bridge hides pi's interactive input language from IM users.

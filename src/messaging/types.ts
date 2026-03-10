@@ -12,7 +12,6 @@ export interface PhiMessageMention {
 export interface PhiMessage {
 	text?: string;
 	attachments: PhiMessageAttachment[];
-	replyToMessageId?: string;
 	mentions?: PhiMessageMention[];
 }
 

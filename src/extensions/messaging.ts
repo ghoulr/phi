@@ -49,8 +49,8 @@ export interface CreatePhiMessagingExtensionDependencies {
 
 function buildPhiMessageGuidance(): string {
 	return [
-		"- Reply with exact `NO_REPLY` when `send()` is called and no more message for user.",
-		"- `NO_REPLY` suppresses the final reply.",
+		"- End with exact `NO_REPLY` when `send()` already delivered everything the user should see.",
+		"- `NO_REPLY` suppresses the final assistant text.",
 	].join("\n");
 }
 
@@ -119,13 +119,12 @@ async function executeSendTool(
 
 	const message = resolvePhiMessage(ctx, input, dependencies.state);
 	if (input.instant === true) {
-		const preparedMessage = dependencies.state.prepareMessage(message);
-		await dependencies.deliverMessage(preparedMessage);
+		await dependencies.deliverMessage(message);
 		return {
 			content: [
 				{
 					type: "text",
-					text: "Message sent immediately. Reply with exact NO_REPLY if this was the full answer.",
+					text: "Message sent immediately. End with exact NO_REPLY if this already delivered everything.",
 				},
 			],
 			details: { instant: true },
@@ -137,7 +136,7 @@ async function executeSendTool(
 		content: [
 			{
 				type: "text",
-				text: "Deferred message staged for turn end.",
+				text: "Deferred message staged for agent run end.",
 			},
 		],
 		details: { instant: false },
@@ -156,11 +155,11 @@ export function createPhiMessagingExtension(
 			name: "send",
 			label: "send",
 			description:
-				"Send a user-visible message immediately or stage it for turn end.",
+				"Send a user-visible message immediately or stage it for agent run end.",
 			promptGuidelines: [
 				"Use send for attachments or explicit user-visible delivery.",
 				"Use mentionSender to mention the current sender when needed.",
-				`If send(instant: true) already delivered the full answer, reply with exact ${NO_REPLY_TOKEN}.`,
+				`If send(instant: true) already delivered everything the user should see, end with exact ${NO_REPLY_TOKEN}.`,
 			],
 			parameters: SendSchema,
 			execute: async (toolCallId, params, signal, onUpdate, ctx) =>
