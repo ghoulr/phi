@@ -27,6 +27,7 @@ import {
 	type PhiConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
+import { applyInlineExtensionLabels } from "@phi/core/inline-extension-labels";
 import {
 	applySkillEnvOverrides,
 	resolveLoadedSkillEnvOverrides,
@@ -38,8 +39,8 @@ import {
 	resolvePhiSkillPaths,
 } from "@phi/core/skills";
 import { loadPhiWorkspaceConfig } from "@phi/core/workspace-config";
+import { installPhiSystemPrompt } from "@phi/core/system-prompt";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
-import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 import {
 	registerPhiMessagingSessionState,
 	type PhiMessagingSessionState,
@@ -100,6 +101,12 @@ async function createPhiResourceLoader(params: {
 		workspaceDir: params.cwd,
 		userHomeDir,
 	});
+	const extensionFactories = [
+		createPhiMemoryMaintenanceExtension({
+			memoryFilePath: ".phi/memory/MEMORY.md",
+		}),
+		...(params.extensionFactories ?? []),
+	];
 	const resourceLoader = new DefaultResourceLoader({
 		cwd: params.cwd,
 		agentDir: params.agentDir,
@@ -108,12 +115,12 @@ async function createPhiResourceLoader(params: {
 		skillsOverride: createPhiSkillsOverride({
 			roots: skillPaths,
 		}),
-		extensionFactories: [
-			createPhiMemoryMaintenanceExtension({
-				memoryFilePath: ".phi/memory/MEMORY.md",
+		extensionFactories,
+		extensionsOverride: (base) =>
+			applyInlineExtensionLabels({
+				extensionFactories,
+				result: base,
 			}),
-			...(params.extensionFactories ?? []),
-		],
 		agentsFilesOverride: () => ({ agentsFiles: [] }),
 	});
 	await resourceLoader.reload();

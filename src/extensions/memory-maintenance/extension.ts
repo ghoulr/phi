@@ -4,6 +4,7 @@ import type {
 	ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
 
+import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
 import { getPhiDailyMemoryFilePathForDate } from "@phi/core/memory-paths";
 import {
 	createPhiTransientTurnSnapshot,
@@ -137,7 +138,7 @@ export function createPhiMemoryMaintenanceExtension(
 	const memoryFilePath =
 		dependencies.memoryFilePath ?? ".phi/memory/MEMORY.md";
 
-	return (pi) => {
+	return labelInlineExtensionFactory("phi/memory-maintenance", (pi) => {
 		pi.on("session_before_switch", async (_event, ctx) => {
 			await runPhiMemoryMaintenance({
 				ctx,
@@ -163,5 +164,5 @@ export function createPhiMemoryMaintenanceExtension(
 				),
 			});
 		});
-	};
+	});
 }

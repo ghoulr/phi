@@ -8,6 +8,7 @@ import type {
 	ExtensionContext,
 	ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
+import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
 import { NO_REPLY_TOKEN } from "@phi/messaging/control-tokens";
 import type { PhiMessagingSessionState } from "@phi/messaging/session-state";
 import type { PhiMessage, PhiMessageAttachment } from "@phi/messaging/types";
@@ -150,7 +151,7 @@ export function buildPhiMessagingEventText(): string {
 export function createPhiMessagingExtension(
 	dependencies: CreatePhiMessagingExtensionDependencies
 ): ExtensionFactory {
-	return (pi: ExtensionAPI) => {
+	return labelInlineExtensionFactory("phi/messaging", (pi: ExtensionAPI) => {
 		pi.registerTool({
 			name: "send",
 			label: "send",
@@ -172,5 +173,5 @@ export function createPhiMessagingExtension(
 					dependencies
 				),
 		});
-	};
+	});
 }

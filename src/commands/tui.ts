@@ -12,6 +12,7 @@ import {
 	type AgentSession,
 } from "@mariozechner/pi-coding-agent";
 
+import { applyInlineExtensionLabels } from "@phi/core/inline-extension-labels";
 import {
 	getPhiPiMemoryFilePath,
 	getPhiSharedAuthFilePath,
@@ -21,8 +22,8 @@ import {
 	createPhiSkillsOverride,
 	resolvePhiGlobalSkillPaths,
 } from "@phi/core/skills";
+import { installPhiSystemPrompt } from "@phi/core/system-prompt";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
-import { installPhiSystemPrompt } from "@phi/extensions/system-prompt";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
@@ -56,6 +57,11 @@ export async function createDefaultTuiSession(
 		join(agentDir, "models.json")
 	);
 	const skillPaths = resolvePhiGlobalSkillPaths(userHomeDir);
+	const extensionFactories = [
+		createPhiMemoryMaintenanceExtension({
+			memoryFilePath,
+		}),
+	];
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
@@ -64,11 +70,12 @@ export async function createDefaultTuiSession(
 		skillsOverride: createPhiSkillsOverride({
 			roots: skillPaths,
 		}),
-		extensionFactories: [
-			createPhiMemoryMaintenanceExtension({
-				memoryFilePath,
+		extensionFactories,
+		extensionsOverride: (base) =>
+			applyInlineExtensionLabels({
+				extensionFactories,
+				result: base,
 			}),
-		],
 	});
 	await resourceLoader.reload();
 

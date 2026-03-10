@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { applyPhiSystemPromptOverride } from "@phi/extensions/system-prompt";
+import { applyPhiSystemPromptOverride } from "@phi/core/system-prompt";
 
 describe("applyPhiSystemPromptOverride", () => {
 	it("pins the rebuilt prompt to phi prompt text", () => {

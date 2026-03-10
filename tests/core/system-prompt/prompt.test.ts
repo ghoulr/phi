@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "bun:test";
 
-import { buildPhiSystemPrompt } from "@phi/extensions/system-prompt";
+import { buildPhiSystemPrompt } from "@phi/core/system-prompt";
 
 function createMemoryFile(content: string): { dir: string; filePath: string } {
 	const dir = mkdtempSync(join(tmpdir(), "phi-system-prompt-"));
@@ -198,7 +198,7 @@ describe("buildPhiSystemPrompt", () => {
 
 			expect(
 				prompt.includes(
-					"- send: Send a user-visible message immediately or stage it for agent run end"
+					"- send: Send a user-visible message immediately or stage it for your final output"
 				)
 			).toBe(true);
 			expect(prompt.includes("not user-authored input")).toBe(true);

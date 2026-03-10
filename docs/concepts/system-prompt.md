@@ -4,10 +4,11 @@ Describes the system prompt used by phi chat sessions.
 
 ## Source files
 
-- Builder: `src/extensions/system-prompt/prompt.ts`
-- Override: `src/extensions/system-prompt/override.ts`
-- Installer: `src/extensions/system-prompt/install.ts`
-- Applied in: `src/core/runtime.ts`, `src/commands/tui.ts`
+- Builder: `src/core/system-prompt/prompt.ts`
+- Override: `src/core/system-prompt/override.ts`
+- Installer: `src/core/system-prompt/install.ts`
+- Barrel: `src/core/system-prompt/index.ts`
+- Applied in: `src/core/runtime.ts`, `src/commands/tui.ts`, `src/core/transient-turn.ts`
 
 ## Prompt inputs
 
@@ -67,7 +68,7 @@ This is metadata, not user input. The agent should not mention it to the user.
 
 ## Runtime behavior
 
-Phi owns the system prompt as a dedicated extension.
+Phi owns the system prompt as a dedicated core module.
 It monkey-patches pi's internal prompt rebuild so the phi prompt persists across turns.
 
 Memory maintenance runs as a separate transient turn.
