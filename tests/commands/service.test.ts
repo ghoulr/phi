@@ -12,6 +12,7 @@ import type {
 	ResolvedTelegramChatServiceConfig,
 } from "@phi/core/config";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
+import { ServiceRoutes } from "@phi/services/routes";
 
 const fakeRuntime: ChatSessionRuntime<AgentSession> = {
 	async getOrCreateSession(): Promise<AgentSession> {
@@ -69,6 +70,7 @@ describe("service command", () => {
 			token: string;
 			chatRoutes: Record<string, { chatId: string; workspace: string }>;
 		}> = [];
+		const createdHandlers: string[] = [];
 		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
 				return [
@@ -94,10 +96,24 @@ describe("service command", () => {
 			resolveCronChats(): ResolvedCronChatServiceConfig[] {
 				return [createCronChatConfig()];
 			},
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createChatHandler({ chatId }) {
+				createdHandlers.push(chatId);
+				return {
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
 			async startCronRuntime() {
 				return createRunningServiceStub();
 			},
-			async startTelegramBot(_runtime, config) {
+			async startTelegramBot(_routes, config) {
 				startedBotConfigs.push(config);
 				return createRunningServiceStub();
 			},
@@ -111,6 +127,11 @@ describe("service command", () => {
 		await Bun.sleep(0);
 		process.emit("SIGTERM");
 		await service;
+		expect(createdHandlers).toEqual([
+			"user-alice",
+			"user-bob",
+			"user-carol",
+		]);
 		expect(startedBotConfigs).toEqual([
 			{
 				token: "t1",
@@ -137,6 +158,55 @@ describe("service command", () => {
 		]);
 	});
 
+	it("creates chat handlers for telegram-only chats without depending on cron resolution", async () => {
+		const createdHandlers: string[] = [];
+		const dependencies: Partial<ServiceCommandDependencies> = {
+			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
+				return [
+					createChatConfig({
+						chatId: "user-bob",
+						workspace: "~/phi/workspaces/bob",
+						telegramChatId: "1002",
+						token: "t1",
+					}),
+				];
+			},
+			resolveCronChats(): ResolvedCronChatServiceConfig[] {
+				return [];
+			},
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createChatHandler({ chatId }) {
+				createdHandlers.push(chatId);
+				return {
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub();
+			},
+			async startTelegramBot() {
+				return createRunningServiceStub();
+			},
+		};
+
+		const service = runServiceCommand(
+			fakeRuntime,
+			{} satisfies PhiConfig,
+			dependencies
+		);
+		await Bun.sleep(0);
+		process.emit("SIGTERM");
+		await service;
+		expect(createdHandlers).toEqual(["user-bob"]);
+	});
+
 	it("fails fast when duplicate telegram route exists under same token", async () => {
 		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
@@ -156,11 +226,21 @@ describe("service command", () => {
 			resolveCronChats(): ResolvedCronChatServiceConfig[] {
 				return [createCronChatConfig()];
 			},
-			async startCronRuntime() {
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createChatHandler() {
 				return {
-					done: new Promise(() => {}),
-					async stop(): Promise<void> {},
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {},
 				};
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub();
 			},
 			async startTelegramBot() {
 				throw new Error(
@@ -176,8 +256,9 @@ describe("service command", () => {
 		);
 	});
 
-	it("stops already started bots when one bot fails to start", async () => {
+	it("stops already started services and disposes chat handlers when startup fails", async () => {
 		const stopCalls = { value: 0 };
+		const disposedHandlers: string[] = [];
 		const dependencies: Partial<ServiceCommandDependencies> = {
 			resolveTelegramChats(): ResolvedTelegramChatServiceConfig[] {
 				return [
@@ -188,10 +269,25 @@ describe("service command", () => {
 			resolveCronChats(): ResolvedCronChatServiceConfig[] {
 				return [createCronChatConfig()];
 			},
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createChatHandler({ chatId }) {
+				return {
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {
+						disposedHandlers.push(chatId);
+					},
+				};
+			},
 			async startCronRuntime() {
 				return createRunningServiceStub(stopCalls);
 			},
-			async startTelegramBot(_runtime, config) {
+			async startTelegramBot(_routes, config) {
 				if (config.token === "t2") {
 					throw new Error("startup failed");
 				}
@@ -202,6 +298,7 @@ describe("service command", () => {
 		await expect(
 			runServiceCommand(fakeRuntime, {} satisfies PhiConfig, dependencies)
 		).rejects.toThrow("startup failed");
-		expect(stopCalls.value).toBe(2);
+		expect(stopCalls.value).toBe(1);
+		expect(disposedHandlers).toEqual(["user-alice"]);
 	});
 });

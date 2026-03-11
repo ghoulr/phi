@@ -1,18 +1,11 @@
 # Messaging
 
-phi owns route adaptation and visible delivery.
+phi owns chat handling and route wiring.
 pi owns agent execution and tool orchestration.
 
 Per-turn runtime context is defined in [system-reminder.md](/home/zhourui/workspace/phi/docs/concepts/system-reminder.md).
 
-## Boundary
-
-Messaging stays a self-contained phi extension.
-
-- Load it only through the standard pi extension entrypoint.
-- Messaging-only semantics must live inside the extension.
-- Route code outside the extension must not interpret `NO_REPLY`, deferred drafts, or sender mentions.
-- Route code outside the extension may only provide visible delivery.
+Messaging is a self-contained phi extension, loaded through the standard pi extension entrypoint.
 
 ## Message Kinds
 
@@ -47,12 +40,4 @@ Rules:
 `NO_REPLY` is messaging-only semantics.
 It suppresses the final assistant text for the active messaging run.
 
-Typical use:
-
-- `send(instant: true)` already delivered the full visible answer
-- a deferred message should be the only visible output
-
-## Route Boundary
-
-Routes may send plain text/media and apply platform rendering limits.
-Routes must not own messaging-specific protocol.
+Messaging semantics (`NO_REPLY`, deferred drafts, sender mentions) live exclusively inside the extension.

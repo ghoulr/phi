@@ -1,7 +1,3 @@
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-
-import type { PhiMessage } from "@phi/messaging/types";
-
 export interface CronJobDefinition {
 	id: string;
 	enabled?: boolean;
@@ -34,9 +30,4 @@ export interface CronRunLogEntry {
 export interface CronReloadResult {
 	jobCount: number;
 	nextRunAtMs: number | undefined;
-}
-
-export interface CronRunResult {
-	assistantMessage?: AssistantMessage;
-	outboundMessages: PhiMessage[];
 }

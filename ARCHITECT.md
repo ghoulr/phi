@@ -1,22 +1,41 @@
 # ARCHITECT: phi
 
 phi is a chat runtime built on top of pi.
-It routes messages from external services into chat-scoped pi sessions.
+It connects endpoints and internal agent execution through config-driven routes.
 
 ## Principles
 
 - Keep it simple.
 - Fail fast.
 - No backward compatibility.
-- Reuse pi as possible.
+- Reuse pi as much as possible.
+
+## Core model
+
+Use this shape:
+
+```text
+Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+```
+
+`◄────►` bidirectional (request + response).
+`─────►` one-way trigger (e.g. cron emits, never receives).
+
+- **Endpoints** — external surfaces (Telegram, cron, terminal)
+- **Routes** — config-driven wiring between endpoints and chat handlers
+- **Chat handlers** — chat-bound runtime that talks to pi
+- **Agent(pi)** — prompt execution, queueing, steering, tools
 
 ## Chat model
 
-A chat has four dimensions:
+A chat is not a transport name.
+There is no separate kind of "cron chat" or "telegram chat".
+
+A chat is the config-bound composition of endpoints, routes, and chat handlers around the same agent-facing identity.
 
 | Dimension | Service chat | TUI chat |
 |-----------|-------------|----------|
-| route | external (e.g. Telegram) | terminal |
+| endpoint side | configured endpoints | terminal |
 | state root | `<workspace>/.phi` | `~/.phi/pi` |
 | working context | configured workspace | current `cwd` |
 | behavior | phi-owned | phi-owned |
@@ -44,17 +63,11 @@ Each workspace has its own agent-owned config:
 
 The agent edits these with normal file tools and calls `reload` to apply.
 
-## Runtime shape
+## Routes
 
-```text
-Service → Route adapter → ChatSessionBridge → pi session
-```
-
-Service chats use one bridge per chat.
-The bridge owns session lifecycle, route adaptation, system reminders, and output routing.
-The bridge does not reimplement pi queueing or command parsing.
-
-See `docs/concepts/chat-session-bridge.md`.
+Routes are config-driven wiring between endpoints and chat handlers.
+They dispatch messages and triggers to the module configured on the other side.
+They do not interpret what a message means.
 
 ## Storage
 
@@ -101,29 +114,26 @@ Before session switch and compaction, phi runs an invisible maintenance turn to 
 
 ## Extensions
 
-- `src/extensions/system-prompt/` — prompt builder
-- `src/extensions/memory-maintenance/` — memory maintenance
 - `src/core/` — runtime infrastructure
-- `src/services/` — route adapters and chat session bridges
+- `src/extensions/memory-maintenance/` — memory maintenance extension
+- `src/extensions/messaging/` — messaging extension
+- `src/services/` — endpoints, routes, and chat handlers
 
 ## Cron
 
-Chat-scoped cron system. Details in `docs/concepts/cron.md`.
-Cron config lives in `<workspace>/.phi/config.yaml`.
+Cron is a source-only endpoint.
 
 ```text
-Service → Route adapter → ChatSessionBridge → pi session
-Cron → CronExecutor
-              ^
-Cron publish ─|
+Cron endpoint  ─────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Endpoints      ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
 ```
 
-Job state lives under the chat workspace, not in global state.
+Cron emits triggers for chats through routes.
 
 ## Reload
 
 `reload` is a chat-scoped tool with no parameters.
-It invalidates the current session; the bridge recreates it on the next submit.
+It invalidates the current chat handler state; the next interactive submit recreates it.
 
 ## Failure strategy
 

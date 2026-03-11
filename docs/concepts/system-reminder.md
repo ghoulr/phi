@@ -46,7 +46,5 @@ two test files
 - Wrap text-like metadata such as `text` or `caption` in fenced code blocks.
 - Remove null, undefined, and empty fields.
 
-## Boundary
-
-- Bridge provides transport background via `system-reminder`.
-- Agent decides reply behavior; route does not infer it.
+System reminder carries transport background, not delivery policy.
+The agent decides reply behavior based on the reminder content.

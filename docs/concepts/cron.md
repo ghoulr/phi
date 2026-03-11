@@ -1,6 +1,8 @@
 # Cron
 
 Chat-scoped background task scheduling.
+Cron is a source-only endpoint.
+It is not a route and not a message sink.
 
 ## Storage
 
@@ -50,11 +52,15 @@ cron:
 
 1. Load cron config from `.phi/config.yaml`
 2. Load the prompt file
-3. Run a fresh agent turn in the chat workspace
-4. Publish the result back through `ChatExecutor`
-5. Recompute next run
+3. Emit a cron trigger for the target chat
+4. Route the trigger to the chat handler
+5. Run the chat turn
+6. Publish assistant state back through `ChatExecutor`
+7. Route outbound messages to endpoints
+8. Recompute next run
 
-Cron runs are isolated from the main session context.
+Cron runs are isolated from the main interactive session context.
+They still target the same chat identity.
 
 ## Reload
 

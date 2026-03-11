@@ -5,19 +5,18 @@ import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
-import type {
-	AgentSession,
-	AgentSessionEvent,
-} from "@mariozechner/pi-coding-agent";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type { Message } from "@grammyjs/types";
 
 import {
 	resetPhiLoggerForTest,
 	setPhiLoggerSettingsForTest,
 } from "@phi/core/logger";
-import type { ChatSessionRuntime } from "@phi/core/runtime";
-import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
+import type { PhiMessage } from "@phi/messaging/types";
+import type { ChatHandler } from "@phi/services/chat-handler";
+import {
+	ServiceRoutes,
+	type ChatHandlerInteractiveInput,
+} from "@phi/services/routes";
 import {
 	buildTelegramSystemReminderMetadata,
 	startTelegramPollingBot,
@@ -59,8 +58,7 @@ class FakeTelegramBot implements TelegramPollingBot {
 	>();
 
 	public constructor(
-		private readonly updates: TelegramTextMessageContext[],
-		private readonly concurrentDispatch: boolean = false
+		private readonly updates: TelegramTextMessageContext[]
 	) {}
 
 	public onTextMessage(
@@ -133,23 +131,9 @@ class FakeTelegramBot implements TelegramPollingBot {
 		if (!this.textMessageHandler) {
 			throw new Error("Text message handler was not registered.");
 		}
-
-		if (this.concurrentDispatch) {
-			await Promise.all(
-				this.updates.map(async (update) => {
-					await this.textMessageHandler?.(update);
-				})
-			);
-			await Promise.resolve();
-			await Promise.resolve();
-			return;
-		}
-
 		for (const update of this.updates) {
 			await this.textMessageHandler(update);
 		}
-		await Promise.resolve();
-		await Promise.resolve();
 	}
 
 	public async stop(): Promise<void> {
@@ -157,129 +141,13 @@ class FakeTelegramBot implements TelegramPollingBot {
 	}
 
 	public emitError(error: unknown): void {
-		if (!this.errorHandler) {
-			throw new Error("Error handler was not registered.");
-		}
-		this.errorHandler(error);
+		this.errorHandler?.(error);
 	}
-}
-
-type FakeRuntimeState = {
-	calls: Array<{
-		chatId: string;
-		prompt: string | (TextContent | ImageContent)[];
-		deliverAs?: "steer" | "followUp";
-	}>;
-	disposeCalls: string[];
-};
-
-function createAssistantTurnEndEvent(text: string): AgentSessionEvent {
-	return {
-		type: "turn_end",
-		turnIndex: 0,
-		message: {
-			role: "assistant",
-			content: [{ type: "text", text }],
-		},
-		toolResults: [],
-	} as unknown as AgentSessionEvent;
-}
-
-function createUserMessageStartEvent(text: string): AgentSessionEvent {
-	return {
-		type: "message_start",
-		message: {
-			role: "user",
-			content: [{ type: "text", text }],
-		},
-	} as unknown as AgentSessionEvent;
-}
-
-function createAgentEndEvent(text: string): AgentSessionEvent {
-	return {
-		type: "agent_end",
-		messages: [
-			{
-				role: "assistant",
-				content: [{ type: "text", text }],
-			},
-		],
-	} as unknown as AgentSessionEvent;
-}
-
-function createFakeRuntime(
-	responseText: string,
-	deliveryRegistry?: PhiRouteDeliveryRegistry
-): {
-	runtime: ChatSessionRuntime<AgentSession>;
-	state: FakeRuntimeState;
-} {
-	const state: FakeRuntimeState = {
-		calls: [],
-		disposeCalls: [],
-	};
-	let listener: ((event: AgentSessionEvent) => void) | undefined;
-	let currentChatId = "";
-
-	const session = {
-		isStreaming: false,
-		subscribe(handler: (event: AgentSessionEvent) => void) {
-			listener = handler;
-			return () => {
-				listener = undefined;
-			};
-		},
-		async sendUserMessage(
-			content: string | (TextContent | ImageContent)[],
-			options?: { deliverAs?: "steer" | "followUp" }
-		): Promise<void> {
-			state.calls.push({
-				chatId: currentChatId,
-				prompt: content,
-				deliverAs: options?.deliverAs,
-			});
-			if (deliveryRegistry && responseText !== "NO_REPLY") {
-				await deliveryRegistry.require(currentChatId).deliver({
-					text: responseText,
-					attachments: [],
-				});
-			}
-			listener?.(createAssistantTurnEndEvent(responseText));
-			listener?.(createAgentEndEvent(responseText));
-		},
-		dispose(): void {},
-	} as unknown as AgentSession;
-
-	const runtime: ChatSessionRuntime<AgentSession> = {
-		async getOrCreateSession(chatId: string) {
-			currentChatId = chatId;
-			return session;
-		},
-		disposeSession(chatId: string): boolean {
-			state.disposeCalls.push(chatId);
-			return true;
-		},
-	};
-
-	return { runtime, state };
-}
-
-function createManagedRuntime(responseText: string): {
-	runtime: ChatSessionRuntime<AgentSession>;
-	state: FakeRuntimeState;
-	deliveryRegistry: PhiRouteDeliveryRegistry;
-} {
-	const deliveryRegistry = new PhiRouteDeliveryRegistry();
-	const { runtime, state } = createFakeRuntime(
-		responseText,
-		deliveryRegistry
-	);
-	return { runtime, state, deliveryRegistry };
 }
 
 let nextUpdateId = 1;
 const createdWorkspaces: string[] = [];
-let currentLogOutput = "";
+let _currentLogOutput = "";
 let logCaptureConfigured = false;
 
 function ensureLogCapture(): void {
@@ -288,7 +156,7 @@ function ensureLogCapture(): void {
 	}
 	const stream = new Writable({
 		write(chunk, _encoding, callback) {
-			currentLogOutput += chunk.toString();
+			_currentLogOutput += chunk.toString();
 			callback();
 		},
 	});
@@ -300,10 +168,6 @@ function ensureLogCapture(): void {
 	logCaptureConfigured = true;
 }
 
-function readCapturedLogs(): string {
-	return currentLogOutput;
-}
-
 function createRouteTarget(chatId: string): TelegramRouteTarget {
 	ensureLogCapture();
 	const workspace = mkdtempSync(join(tmpdir(), "phi-telegram-workspace-"));
@@ -311,15 +175,17 @@ function createRouteTarget(chatId: string): TelegramRouteTarget {
 	return { chatId, workspace };
 }
 
-afterEach(() => {
-	resetPhiLoggerForTest();
-	currentLogOutput = "";
-	logCaptureConfigured = false;
-	for (const workspace of createdWorkspaces) {
-		rmSync(workspace, { recursive: true, force: true });
-	}
-	createdWorkspaces.length = 0;
-});
+function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
+	return {
+		async submitInteractive(): Promise<void> {},
+		async submitCron(): Promise<PhiMessage[]> {
+			return [];
+		},
+		invalidate(): void {},
+		dispose(): void {},
+		...overrides,
+	};
+}
 
 function createContext(
 	overrides?: Partial<TelegramTextMessageContext>
@@ -354,6 +220,16 @@ function createContext(
 		message: mergedMessage,
 	};
 }
+
+afterEach(() => {
+	resetPhiLoggerForTest();
+	_currentLogOutput = "";
+	logCaptureConfigured = false;
+	for (const workspace of createdWorkspaces) {
+		rmSync(workspace, { recursive: true, force: true });
+	}
+	createdWorkspaces.length = 0;
+});
 
 describe("telegram service", () => {
 	it("builds reminder metadata from reply_to_message", () => {
@@ -510,55 +386,48 @@ describe("telegram service", () => {
 		});
 	});
 
-	it("routes telegram message to configured chat", async () => {
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				message: {
-					id: 10,
-					text: "hello from telegram",
-					attachments: [],
+	it("routes telegram message to the configured chat handler", async () => {
+		const bot = new FakeTelegramBot([createContext()]);
+		const routes = new ServiceRoutes();
+		const submissions: ChatHandlerInteractiveInput[] = [];
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(input): Promise<void> {
+					submissions.push(input);
 				},
-			}),
-		]);
-		const { runtime, state, deliveryRegistry } =
-			createManagedRuntime("assistant reply");
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
 		await running.done;
 
-		expect(state.calls[0]?.chatId).toBe("user-alice");
-		expect(Array.isArray(state.calls[0]?.prompt)).toBe(true);
-		expect(state.calls[0]?.prompt?.[0]).toEqual({
-			type: "text",
-			text: "hello from telegram",
-		});
-		expect(state.calls[0]?.prompt?.[1]).toEqual({
-			type: "text",
-			text: expect.stringContaining("<system-reminder>"),
-		});
-		expect(fakeBot.sentTexts).toEqual([
+		expect(submissions).toEqual([
 			{
-				chatId: "42",
-				text: "assistant reply",
-				replyToMessageId: undefined,
+				text: "hello",
+				attachments: [],
+				metadata: {
+					current_message: {
+						message_id: 10,
+					},
+				},
+				sendTyping: expect.any(Function),
 			},
 		]);
-		expect(fakeBot.startCalls).toBe(1);
-		expect(state.disposeCalls).toEqual(["user-alice"]);
+		expect(bot.startCalls).toBe(1);
 	});
 
-	it("downloads document attachments and passes local paths to the agent", async () => {
-		const fakeBot = new FakeTelegramBot([
+	it("downloads document attachments and passes local paths to the chat handler", async () => {
+		const bot = new FakeTelegramBot([
 			createContext({
 				message: {
 					id: 10,
@@ -574,63 +443,44 @@ describe("telegram service", () => {
 				},
 			}),
 		]);
-		fakeBot.downloadedFiles.set("doc-1", {
+		bot.downloadedFiles.set("doc-1", {
 			data: new Uint8Array([1, 2, 3]),
 			filePath: "documents/report.pdf",
 			contentType: "application/pdf",
 		});
-		const route = createRouteTarget("user-alice");
-		const { runtime, state, deliveryRegistry } =
-			createManagedRuntime("assistant reply");
+		const routes = new ServiceRoutes();
+		const submissions: ChatHandlerInteractiveInput[] = [];
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(input): Promise<void> {
+					submissions.push(input);
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
 		await running.done;
 
-		const prompt = state.calls[0]?.prompt;
-		expect(Array.isArray(prompt)).toBe(true);
-		expect(prompt?.[0]).toEqual({
-			type: "text",
-			text: expect.stringContaining("check this"),
-		});
-		expect(
-			typeof prompt?.[0] === "object" &&
-				prompt[0] !== null &&
-				"text" in prompt[0]
-				? prompt[0].text
-				: ""
-		).toContain("User sent attachments:");
-		expect(
-			typeof prompt?.[0] === "object" &&
-				prompt[0] !== null &&
-				"text" in prompt[0]
-				? prompt[0].text
-				: ""
-		).toContain(".phi/inbox/");
-		expect(
-			typeof prompt?.[0] === "object" &&
-				prompt[0] !== null &&
-				"text" in prompt[0]
-				? prompt[0].text
-				: ""
-		).toContain("report.pdf");
-		expect(prompt?.at(-1)).toEqual({
-			type: "text",
-			text: expect.stringContaining("<system-reminder>"),
-		});
+		const input = submissions[0];
+		expect(input?.text).toBe("check this");
+		expect(input?.attachments).toHaveLength(1);
+		expect(input?.attachments[0]?.path).toContain(".phi/inbox/");
+		expect(input?.attachments[0]?.name).toContain("report.pdf");
+		expect(input?.attachments[0]?.mimeType).toBe("application/pdf");
 	});
 
-	it("downloads photo attachments and passes them as images to the agent", async () => {
-		const fakeBot = new FakeTelegramBot([
+	it("downloads photo attachments and passes them as generic attachments", async () => {
+		const bot = new FakeTelegramBot([
 			createContext({
 				message: {
 					id: 10,
@@ -645,54 +495,52 @@ describe("telegram service", () => {
 				},
 			}),
 		]);
-		fakeBot.downloadedFiles.set("photo-1", {
+		bot.downloadedFiles.set("photo-1", {
 			data: new Uint8Array([1, 2, 3]),
 			filePath: "photos/file_1.jpg",
 			contentType: "image/jpeg",
 		});
-		const route = createRouteTarget("user-alice");
-		const { runtime, state, deliveryRegistry } =
-			createManagedRuntime("assistant reply");
+		const routes = new ServiceRoutes();
+		const submissions: ChatHandlerInteractiveInput[] = [];
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(input): Promise<void> {
+					submissions.push(input);
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
 		await running.done;
 
-		const prompt = state.calls[0]?.prompt;
-		expect(Array.isArray(prompt)).toBe(true);
-		expect(prompt?.[0]).toEqual({
-			type: "text",
-			text: expect.stringContaining("User sent 1 image attachment(s)."),
-		});
-		expect(
-			typeof prompt?.[0] === "object" &&
-				prompt[0] !== null &&
-				"text" in prompt[0]
-				? prompt[0].text
-				: ""
-		).toContain(".phi/inbox/");
-		expect(prompt?.[1]).toEqual({
-			type: "image",
-			mimeType: "image/jpeg",
-			data: "AQID",
-		});
-		expect(prompt?.at(-1)).toEqual({
-			type: "text",
-			text: expect.stringContaining("<system-reminder>"),
+		const input = submissions[0];
+		expect(input?.text).toBe("see image");
+		expect(input?.attachments).toEqual([
+			{
+				path: expect.stringContaining(".phi/inbox/"),
+				name: expect.stringContaining(".jpg"),
+				mimeType: "image/jpeg",
+			},
+		]);
+		expect(input?.metadata).toEqual({
+			current_message: {
+				message_id: 10,
+			},
 		});
 	});
 
-	it("passes attachment-only photos to the agent without requiring text", async () => {
-		const fakeBot = new FakeTelegramBot([
+	it("passes attachment-only photos without requiring text", async () => {
+		const bot = new FakeTelegramBot([
 			createContext({
 				message: {
 					id: 10,
@@ -707,247 +555,102 @@ describe("telegram service", () => {
 				},
 			}),
 		]);
-		fakeBot.downloadedFiles.set("photo-1", {
+		bot.downloadedFiles.set("photo-1", {
 			data: new Uint8Array([1, 2, 3]),
 			filePath: "photos/file_1.jpg",
 			contentType: "image/jpeg",
 		});
-		const route = createRouteTarget("user-alice");
-		const { runtime, state, deliveryRegistry } =
-			createManagedRuntime("assistant reply");
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": route,
+		const routes = new ServiceRoutes();
+		const submissions: ChatHandlerInteractiveInput[] = [];
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(input): Promise<void> {
+					submissions.push(input);
 				},
-			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
-		);
-		await running.done;
-
-		const prompt = state.calls[0]?.prompt;
-		expect(Array.isArray(prompt)).toBe(true);
-		expect(prompt?.[0]).toEqual({
-			type: "text",
-			text: expect.stringContaining("User sent 1 image attachment(s)."),
-		});
-		expect(
-			typeof prompt?.[0] === "object" &&
-				prompt[0] !== null &&
-				"text" in prompt[0]
-				? prompt[0].text
-				: ""
-		).toContain(".phi/inbox/");
-		expect(prompt?.[1]).toEqual({
-			type: "image",
-			mimeType: "image/jpeg",
-			data: "AQID",
-		});
-		expect(prompt?.at(-1)).toEqual({
-			type: "text",
-			text: expect.stringContaining("<system-reminder>"),
-		});
-	});
-
-	it("steers same-chat updates when a session is already streaming", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		let releaseFirst: (() => void) | undefined;
-		let streaming = false;
-		let secondQueued = false;
-		const calls: Array<{ text: string | undefined; deliverAs?: string }> =
-			[];
-
-		const session = {
-			get isStreaming() {
-				return streaming;
-			},
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(
-				content: string | (TextContent | ImageContent)[],
-				options?: { deliverAs?: "steer" | "followUp" }
-			): Promise<void> {
-				const text =
-					typeof content === "string"
-						? content
-						: content
-								.filter(
-									(part): part is TextContent =>
-										part.type === "text"
-								)
-								.map((part) => part.text)
-								.find((part) => part === "m1" || part === "m2");
-				calls.push({ text, deliverAs: options?.deliverAs });
-				if (text === "m1") {
-					listener?.(createUserMessageStartEvent("m1"));
-					streaming = true;
-					await new Promise<void>((resolve) => {
-						releaseFirst = resolve;
-					});
-					listener?.(createAssistantTurnEndEvent("first reply"));
-					if (secondQueued) {
-						listener?.(createUserMessageStartEvent("m2"));
-						listener?.(createAssistantTurnEndEvent("second reply"));
-					}
-					const finalReply = secondQueued
-						? "second reply"
-						: "first reply";
-					await deliveryRegistry.require("user-alice").deliver({
-						text: finalReply,
-						attachments: [],
-					});
-					listener?.(createAgentEndEvent(finalReply));
-					streaming = false;
-					return;
-				}
-				secondQueued = true;
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-
-		const fakeBot = new FakeTelegramBot(
-			[
-				createContext({
-					chat: { id: 7 },
-					message: { id: 101, text: "m1", attachments: [] },
-				}),
-				createContext({
-					chat: { id: 7 },
-					message: { id: 102, text: "m2", attachments: [] },
-				}),
-			],
-			true
+			})
 		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"7": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
-		);
-
-		for (let attempt = 0; attempt < 10 && calls.length < 2; attempt += 1) {
-			await Promise.resolve();
-		}
-		expect(calls).toEqual([
-			{ text: "m1", deliverAs: undefined },
-			{ text: "m2", deliverAs: "steer" },
-		]);
-		if (!releaseFirst) {
-			throw new Error("First resolver was not assigned.");
-		}
-		releaseFirst();
-
-		await running.done;
-		expect(fakeBot.sentTexts.map((entry) => entry.text)).toEqual([
-			"second reply",
-		]);
-	});
-
-	it("delivers only the final assistant turn after tool retries", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const fakeBot = new FakeTelegramBot([createContext()]);
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				listener?.(createUserMessageStartEvent("hello"));
-				listener?.(createAssistantTurnEndEvent("I will handle it."));
-				listener?.(createAssistantTurnEndEvent("done"));
-				await deliveryRegistry.require("user-alice").deliver({
-					text: "done",
-					attachments: [],
-				});
-				listener?.(createAgentEndEvent("done"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-
-		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
+		);
+		await running.done;
+
+		const input = submissions[0];
+		expect(input?.text).toBeUndefined();
+		expect(input?.attachments).toEqual([
+			{
+				path: expect.stringContaining(".phi/inbox/"),
+				name: expect.stringContaining(".jpg"),
+				mimeType: "image/jpeg",
+			},
+		]);
+	});
+
+	it("delivers outbound messages through registered telegram routes", async () => {
+		const bot = new FakeTelegramBot([createContext()]);
+		const routes = new ServiceRoutes();
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					await routes.deliverOutbound("user-alice", {
+						text: "assistant reply",
+						attachments: [],
+					});
+				},
+			})
 		);
 
+		const running = await startTelegramPollingBot(
+			routes,
+			{
+				token: "test-token",
+				chatRoutes: {
+					"42": createRouteTarget("user-alice"),
+				},
+			},
+			{ createBot: () => bot }
+		);
 		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{
 				chatId: "42",
-				text: "done",
+				text: "assistant reply",
 				replyToMessageId: undefined,
 			},
 		]);
 	});
 
 	it("replies request error text for unknown chat route", async () => {
-		const fakeBot = new FakeTelegramBot([
+		const bot = new FakeTelegramBot([
 			createContext({
 				chat: { id: 999 },
 				message: { id: 10, text: "unknown chat", attachments: [] },
 			}),
 		]);
-		const { runtime, state } = createFakeRuntime("unused");
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			new ServiceRoutes(),
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(state.calls).toEqual([]);
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{
 				chatId: "999",
 				text: "No agent configured for telegram chat id: 999",
@@ -956,30 +659,37 @@ describe("telegram service", () => {
 		]);
 	});
 
-	it("replies request error text for invalid message payload", async () => {
-		const fakeBot = new FakeTelegramBot([
+	it("replies request error text for invalid payload", async () => {
+		const bot = new FakeTelegramBot([
 			createContext({
 				message: { id: 10, text: "a\u0000b", attachments: [] },
 			}),
 		]);
-		const { runtime, state } = createFakeRuntime("unused");
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
+		const routes = new ServiceRoutes();
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(input): Promise<void> {
+					if (input.text?.includes("\u0000")) {
+						throw new Error("message must not contain null bytes");
+					}
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(state.calls).toEqual([]);
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{
 				chatId: "42",
 				text: "message must not contain null bytes",
@@ -988,115 +698,107 @@ describe("telegram service", () => {
 		]);
 	});
 
-	it("replies request error text for internal runtime failure", async () => {
-		const route = createRouteTarget("user-alice");
-		const fakeBot = new FakeTelegramBot([createContext()]);
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession(): Promise<AgentSession> {
-				throw new Error("runtime unavailable");
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
+	it("replies request error text for chat handler failure", async () => {
+		const bot = new FakeTelegramBot([createContext()]);
+		const routes = new ServiceRoutes();
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					throw new Error("runtime unavailable");
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{
 				chatId: "42",
 				text: "runtime unavailable",
 				replyToMessageId: "10",
 			},
 		]);
-
-		const logsContent = readCapturedLogs();
-		expect(logsContent.includes('"direction":"inbound"')).toBe(true);
-		expect(logsContent.includes('"source":"error"')).toBe(true);
-		expect(logsContent.includes('"text":"runtime unavailable"')).toBe(true);
 	});
 
 	it("sanitizes request error text before replying", async () => {
-		const fakeBot = new FakeTelegramBot([createContext()]);
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession(): Promise<AgentSession> {
-				throw new Error("a\u0001b\u007fc");
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
+		const bot = new FakeTelegramBot([createContext()]);
+		const routes = new ServiceRoutes();
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					throw new Error("a\u0001b\u007fc");
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{ chatId: "42", text: "abc", replyToMessageId: "10" },
 		]);
 	});
 
-	it("sanitizes and chunks long assistant replies", async () => {
-		const fakeBot = new FakeTelegramBot([createContext()]);
+	it("sanitizes and chunks long outbound replies", async () => {
+		const bot = new FakeTelegramBot([createContext()]);
 		const longText = `${"a".repeat(4200)}\u0001${"b".repeat(120)}`;
-		const { runtime, deliveryRegistry } = createManagedRuntime(longText);
+		const routes = new ServiceRoutes();
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					await routes.deliverOutbound("user-alice", {
+						text: longText,
+						attachments: [],
+					});
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(fakeBot.sentTexts.length).toBeGreaterThan(1);
-		expect(
-			fakeBot.sentTexts.every((entry) => entry.text.length <= 4096)
-		).toBe(true);
-		expect(fakeBot.sentTexts.map((entry) => entry.text).join("")).toBe(
+
+		expect(bot.sentTexts.length).toBeGreaterThan(1);
+		expect(bot.sentTexts.every((entry) => entry.text.length <= 4096)).toBe(
+			true
+		);
+		expect(bot.sentTexts.map((entry) => entry.text).join("")).toBe(
 			`${"a".repeat(4200)}${"b".repeat(120)}`
 		);
-		expect(fakeBot.sentTexts[0]?.replyToMessageId).toBeUndefined();
 	});
 
-	it("skips duplicate updates after processed state in logs", async () => {
-		const route = createRouteTarget("user-alice");
-		const { runtime, state, deliveryRegistry } =
-			createManagedRuntime("assistant reply");
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				updateId: 100,
-				message: { id: 1, text: "hello", attachments: [] },
-			}),
+	it("skips duplicate updates after a successful submit", async () => {
+		const bot = new FakeTelegramBot([
 			createContext({
 				updateId: 100,
 				message: { id: 1, text: "hello", attachments: [] },
@@ -1106,37 +808,34 @@ describe("telegram service", () => {
 				message: { id: 1, text: "hello", attachments: [] },
 			}),
 		]);
+		const routes = new ServiceRoutes();
+		let callCount = 0;
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					callCount += 1;
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
 
-		expect(state.calls).toHaveLength(1);
-		expect(fakeBot.sentTexts.map((entry) => entry.text)).toEqual([
-			"assistant reply",
-		]);
-		expect(fakeBot.sentTexts[0]?.replyToMessageId).toBeUndefined();
-
-		const logsContent = readCapturedLogs();
-		const auditLines = logsContent
-			.split("\n")
-			.filter((line) => line.includes('"category":"audit"'));
-		expect(auditLines).toHaveLength(1);
+		expect(callCount).toBe(1);
 	});
 
 	it("allows retrying the same update after a failed attempt", async () => {
-		const route = createRouteTarget("user-alice");
-		const fakeBot = new FakeTelegramBot([
+		const bot = new FakeTelegramBot([
 			createContext({
 				updateId: 100,
 				message: { id: 1, text: "hello", attachments: [] },
@@ -1146,41 +845,37 @@ describe("telegram service", () => {
 				message: { id: 1, text: "hello", attachments: [] },
 			}),
 		]);
-		const {
-			runtime: successRuntime,
-			state,
-			deliveryRegistry,
-		} = createManagedRuntime("assistant reply");
+		const routes = new ServiceRoutes();
 		let attempt = 0;
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession(chatId: string) {
-				attempt += 1;
-				if (attempt === 1) {
-					throw new Error("runtime unavailable");
-				}
-				return await successRuntime.getOrCreateSession(chatId);
-			},
-			disposeSession(chatId: string): boolean {
-				return successRuntime.disposeSession(chatId);
-			},
-		};
+		routes.registerChatHandler(
+			"user-alice",
+			createChatHandler({
+				async submitInteractive(): Promise<void> {
+					attempt += 1;
+					if (attempt === 1) {
+						throw new Error("runtime unavailable");
+					}
+					await routes.deliverOutbound("user-alice", {
+						text: "assistant reply",
+						attachments: [],
+					});
+				},
+			})
+		);
 
 		const running = await startTelegramPollingBot(
-			runtime,
+			routes,
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
+			{ createBot: () => bot }
 		);
-
 		await running.done;
-		expect(state.calls).toHaveLength(1);
-		expect(fakeBot.sentTexts).toEqual([
+
+		expect(bot.sentTexts).toEqual([
 			{
 				chatId: "42",
 				text: "runtime unavailable",
@@ -1192,119 +887,5 @@ describe("telegram service", () => {
 				replyToMessageId: undefined,
 			},
 		]);
-	});
-
-	it("sends typing for assistant thoughts and text, not tool calls", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		let typingCalls = 0;
-
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				if (!listener) {
-					throw new Error("Session listener was not registered.");
-				}
-				listener({
-					type: "message_update",
-					message: { role: "assistant" },
-					assistantMessageEvent: { type: "thinking_delta" },
-				} as unknown as AgentSessionEvent);
-				listener({
-					type: "message_update",
-					message: { role: "assistant" },
-					assistantMessageEvent: { type: "toolcall_start" },
-				} as unknown as AgentSessionEvent);
-				listener({
-					type: "message_update",
-					message: { role: "assistant" },
-					assistantMessageEvent: { type: "text_delta" },
-				} as unknown as AgentSessionEvent);
-				listener(createAssistantTurnEndEvent("done"));
-				listener(createAgentEndEvent("done"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				sendTyping: async () => {
-					typingCalls += 1;
-					return { ok: true };
-				},
-			}),
-		]);
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot },
-			deliveryRegistry
-		);
-
-		await running.done;
-		expect(typingCalls).toBeGreaterThan(0);
-	});
-
-	it("skips fallback final delivery when messaging is extension-managed", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				listener?.(createAssistantTurnEndEvent("done"));
-				listener?.(createAgentEndEvent("done"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const fakeBot = new FakeTelegramBot([createContext()]);
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot },
-			new PhiRouteDeliveryRegistry()
-		);
-
-		await running.done;
-		expect(fakeBot.sentTexts).toEqual([]);
 	});
 });

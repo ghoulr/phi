@@ -5,26 +5,11 @@ import { disablePiVersionCheck } from "@phi/core/pi";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import { createReloadTool } from "@phi/core/reload-tool";
 import { createPhiAgentSession, createPhiRuntime } from "@phi/core/runtime";
-import { createPhiMessagingExtension } from "@phi/extensions/messaging";
-import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
+import { createServiceSessionExtensionFactories } from "@phi/services/chat-handler";
+import { ServiceRoutes } from "@phi/services/routes";
 import { tui } from "@phi/tui";
 
 disablePiVersionCheck();
-
-function createMessagingExtensionFactories(params: {
-	chatId: string;
-	deliveryRegistry: PhiRouteDeliveryRegistry;
-}) {
-	return [
-		createPhiMessagingExtension({
-			deliverMessage: async (message) => {
-				await params.deliveryRegistry
-					.require(params.chatId)
-					.deliver(message);
-			},
-		}),
-	];
-}
 
 const app = tui({
 	runTui: async () => {
@@ -33,44 +18,22 @@ const app = tui({
 	runService: async (options) => {
 		const phiConfig = loadPhiConfig(getDefaultPhiConfigFilePath());
 		const reloadRegistry = new ChatReloadRegistry();
-		const deliveryRegistry = new PhiRouteDeliveryRegistry();
-		const routedChatIds = new Set(
-			Object.entries(phiConfig.chats ?? {})
-				.filter(
-					([, chatConfig]) =>
-						chatConfig.routes?.telegram &&
-						chatConfig.routes.telegram.enabled !== false
-				)
-				.map(([chatId]) => chatId)
-		);
+		const routes = new ServiceRoutes();
 		const runtime = createPhiRuntime(
 			phiConfig,
 			{},
 			async (chatId: string) => {
 				const customTools = [createReloadTool(chatId, reloadRegistry)];
-				if (!routedChatIds.has(chatId)) {
-					return await createPhiAgentSession(chatId, phiConfig, {
-						customTools,
-						printSystemPrompt: options.printSystemPrompt === true,
-					});
-				}
-
 				return await createPhiAgentSession(chatId, phiConfig, {
 					customTools,
 					printSystemPrompt: options.printSystemPrompt === true,
-					extensionFactories: createMessagingExtensionFactories({
+					extensionFactories: createServiceSessionExtensionFactories(
 						chatId,
-						deliveryRegistry,
-					}),
+						routes
+					),
 				});
 			}
 		);
-		for (const chatId of Object.keys(phiConfig.chats ?? {})) {
-			reloadRegistry.register(chatId, async () => {
-				runtime.invalidateSession(chatId);
-				return ["session"];
-			});
-		}
 		if (options.printSystemPrompt === true) {
 			for (const chatId of Object.keys(phiConfig.chats ?? {})) {
 				await runtime.getOrCreateSession(chatId);
@@ -80,8 +43,8 @@ const app = tui({
 			createReloadRegistry(): ChatReloadRegistry {
 				return reloadRegistry;
 			},
-			createDeliveryRegistry(): PhiRouteDeliveryRegistry {
-				return deliveryRegistry;
+			createRoutes(): ServiceRoutes {
+				return routes;
 			},
 		});
 	},

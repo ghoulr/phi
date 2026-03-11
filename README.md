@@ -9,26 +9,19 @@ See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 ## Concepts
 
 - [Chat](./docs/concepts/chat.md)
+- [Chat Handler](./docs/concepts/chat-handler.md)
 - [Workspace Config](./docs/concepts/workspace-config.md)
 - [System Prompt](./docs/concepts/system-prompt.md)
 - [Skills](./docs/concepts/skills.md)
 - [Cron](./docs/concepts/cron.md)
+- [Routes](./docs/concepts/routes.md)
 - [Memory](./docs/concepts/memory.md)
 - [Transient Turn](./docs/concepts/transient-turn.md)
 - [Log](./docs/concepts/log.md)
 
 ```text
-                    ┌─────────┐
-                    │ Service │ ← All external interfaces (IM, API, CLI, etc.)
-                    └────┬────┘
-                         │ routes
-                    ┌────▼────┐
-              ┌─────┤ Runtime ├─────┐
-              │     └────┬────┘     │
-              │          │          │
-         ┌────▼────┐     │     ┌────▼─────┐
-         │  Chat   │◄────┘     │ Agent(pi)│
-         └─────────┘           └──────────┘
+Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+                     config-driven wiring
 ```
 
 ## Quick Start
