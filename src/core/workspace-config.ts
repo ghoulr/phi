@@ -24,16 +24,11 @@ export interface PhiWorkspaceSkillsConfig {
 	entries?: Record<string, PhiWorkspaceSkillEntryConfig>;
 }
 
-export interface PhiWorkspaceExtensionsConfig {
-	disabled?: string[];
-}
-
 export interface PhiWorkspaceConfig {
 	version?: number;
 	chat?: PhiWorkspaceChatConfig;
 	cron?: PhiWorkspaceCronConfig;
 	skills?: PhiWorkspaceSkillsConfig;
-	extensions?: PhiWorkspaceExtensionsConfig;
 }
 
 export const PHI_WORKSPACE_CONFIG_VERSION = 1;
@@ -92,7 +87,6 @@ export function loadPhiWorkspaceConfig(
 	requireOptionalRecord(rawConfig.chat, "chat", configFilePath);
 	requireOptionalRecord(rawConfig.cron, "cron", configFilePath);
 	requireOptionalRecord(rawConfig.skills, "skills", configFilePath);
-	requireOptionalRecord(rawConfig.extensions, "extensions", configFilePath);
 	return rawConfig as PhiWorkspaceConfig;
 }
 
@@ -131,38 +125,6 @@ export function resolveWorkspaceCronJobDefinitions(
 		);
 	}
 	return jobs as CronJobDefinition[];
-}
-
-export function resolveWorkspaceDisabledExtensionIds(
-	workspaceConfig: PhiWorkspaceConfig,
-	configFilePath: string
-): string[] {
-	const disabled = workspaceConfig.extensions?.disabled;
-	if (disabled === undefined) {
-		return [];
-	}
-	if (!Array.isArray(disabled)) {
-		throw new Error(
-			`Invalid workspace config: extensions.disabled must be a list (${configFilePath})`
-		);
-	}
-
-	const unique = new Set<string>();
-	for (const rawId of disabled) {
-		if (typeof rawId !== "string") {
-			throw new Error(
-				`Invalid workspace config: extensions.disabled must contain only strings (${configFilePath})`
-			);
-		}
-		const id = rawId.trim();
-		if (!id) {
-			throw new Error(
-				`Invalid workspace config: extensions.disabled must not contain empty strings (${configFilePath})`
-			);
-		}
-		unique.add(id);
-	}
-	return Array.from(unique);
 }
 
 export function resolveWorkspaceSkillEnvOverrides(

@@ -18,14 +18,6 @@ import {
 } from "@phi/core/chat-workspace";
 import { getPhiLogger } from "@phi/core/logger";
 import {
-	isPhiOwnedExtensionEnabled,
-	PHI_MESSAGING_EXTENSION_ID,
-} from "@phi/core/phi-extensions";
-import {
-	loadPhiWorkspaceConfig,
-	resolveWorkspaceDisabledExtensionIds,
-} from "@phi/core/workspace-config";
-import {
 	chunkTextForOutbound,
 	sanitizeInboundText,
 	sanitizeOutboundText,
@@ -149,22 +141,6 @@ function normalizeTelegramMessageId(value: number | string): string {
 
 function normalizeTelegramUpdateId(value: number): string {
 	return String(value);
-}
-
-function isMessagingEnabledForRoute(target: TelegramRouteTarget): boolean {
-	const workspaceDir = resolveChatWorkspaceDirectory(target.workspace);
-	const workspaceLayout = ensureChatWorkspaceLayout(workspaceDir);
-	const workspaceConfig = loadPhiWorkspaceConfig(
-		workspaceLayout.configFilePath
-	);
-	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
-		workspaceConfig,
-		workspaceLayout.configFilePath
-	);
-	return isPhiOwnedExtensionEnabled(
-		disabledExtensionIds,
-		PHI_MESSAGING_EXTENSION_ID
-	);
 }
 
 function buildTelegramInboxDatePrefix(now: Date): string {
@@ -1097,7 +1073,7 @@ export async function startTelegramPollingBot(
 	runtime: ChatSessionRuntime<AgentSession>,
 	config: ResolvedTelegramPollingBotConfig,
 	dependencies: TelegramServiceDependencies = defaultTelegramServiceDependencies,
-	deliveryRegistry?: PhiRouteDeliveryRegistry
+	deliveryRegistry: PhiRouteDeliveryRegistry
 ): Promise<RunningTelegramPollingBot> {
 	const bot = dependencies.createBot(config.token);
 	const bridges = new Map<string, ChatSessionBridge>();
@@ -1120,19 +1096,14 @@ export async function startTelegramPollingBot(
 		});
 	});
 
-	const unregisterDeliveries = deliveryRegistry
-		? Object.entries(config.chatRoutes).map(([telegramChatId, target]) =>
-				deliveryRegistry.register(target.chatId, {
-					deliver: async (message: PhiMessage) => {
-						await deliverTelegramMessage(
-							bot,
-							telegramChatId,
-							message
-						);
-					},
-				})
-			)
-		: [];
+	const unregisterDeliveries = Object.entries(config.chatRoutes).map(
+		([telegramChatId, target]) =>
+			deliveryRegistry.register(target.chatId, {
+				deliver: async (message: PhiMessage) => {
+					await deliverTelegramMessage(bot, telegramChatId, message);
+				},
+			})
+	);
 
 	bot.onTextMessage(async (context: TelegramTextMessageContext) => {
 		const telegramChatId = normalizeTelegramChatId(context.chat.id);
@@ -1155,9 +1126,7 @@ export async function startTelegramPollingBot(
 				};
 				bridgeStates.set(target.chatId, routeState);
 				bridge = new ChatSessionBridge(runtime, target.chatId, {
-					isMessagingManaged: () =>
-						deliveryRegistry !== undefined &&
-						isMessagingEnabledForRoute(target),
+					messagingManaged: true,
 					onResolved: async (outboundMessages) =>
 						await handleResolvedTelegramRun(
 							bot,

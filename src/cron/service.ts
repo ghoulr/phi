@@ -19,7 +19,6 @@ import { getPhiLogger } from "@phi/core/logger";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import {
 	loadPhiWorkspaceConfig,
-	resolveWorkspaceDisabledExtensionIds,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
 import {
@@ -33,10 +32,6 @@ import type {
 	CronRunResult,
 	LoadedCronJob,
 } from "@phi/cron/types";
-import {
-	createEnabledPhiOwnedExtensionFactories,
-	PHI_MESSAGING_EXTENSION_ID,
-} from "@phi/core/phi-extensions";
 import { createPhiMessagingExtension } from "@phi/extensions/messaging";
 import { resolvePlainAssistantMessage } from "@phi/messaging/assistant-output";
 import type { PhiMessage } from "@phi/messaging/types";
@@ -79,7 +74,7 @@ export interface CronServiceDependencies {
 }
 
 export interface CreateDefaultCronServiceDependenciesParams {
-	deliveryRegistry?: PhiRouteDeliveryRegistry;
+	deliveryRegistry: PhiRouteDeliveryRegistry;
 	createAgentSession?: typeof createPhiAgentSession;
 }
 
@@ -137,32 +132,24 @@ function createMessagingExtensionFactories(params: {
 	chatId: string;
 	deliveryRegistry: PhiRouteDeliveryRegistry;
 	deliveryMessages: PhiMessage[];
-	disabledExtensionIds: readonly string[];
 }): ExtensionFactory[] {
-	return createEnabledPhiOwnedExtensionFactories({
-		disabledExtensionIds: params.disabledExtensionIds,
-		definitions: [
-			{
-				id: PHI_MESSAGING_EXTENSION_ID,
-				create: () =>
-					createPhiMessagingExtension({
-						deliverMessage: async (message, phase) => {
-							if (phase === "instant") {
-								await params.deliveryRegistry
-									.require(params.chatId)
-									.deliver(message);
-								return;
-							}
-							params.deliveryMessages.push(message);
-						},
-					}),
+	return [
+		createPhiMessagingExtension({
+			deliverMessage: async (message, phase) => {
+				if (phase === "instant") {
+					await params.deliveryRegistry
+						.require(params.chatId)
+						.deliver(message);
+					return;
+				}
+				params.deliveryMessages.push(message);
 			},
-		],
-	});
+		}),
+	];
 }
 
 export function createDefaultCronServiceDependencies(
-	params: CreateDefaultCronServiceDependenciesParams = {}
+	params: CreateDefaultCronServiceDependenciesParams
 ): CronServiceDependencies {
 	const createAgentSession =
 		params.createAgentSession ?? createPhiAgentSession;
@@ -177,23 +164,14 @@ export function createDefaultCronServiceDependencies(
 			const workspaceDir = resolveChatWorkspaceDirectory(
 				chatConfig.workspace
 			);
-			const workspaceLayout = ensureChatWorkspaceLayout(workspaceDir);
-			const workspaceConfig = loadPhiWorkspaceConfig(
-				workspaceLayout.configFilePath
-			);
-			const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
-				workspaceConfig,
-				workspaceLayout.configFilePath
-			);
+			ensureChatWorkspaceLayout(workspaceDir);
 			const outboundMessages: PhiMessage[] = [];
-			const messagingExtensionFactories = deliveryRegistry
-				? createMessagingExtensionFactories({
-						chatId,
-						deliveryRegistry,
-						deliveryMessages: outboundMessages,
-						disabledExtensionIds,
-					})
-				: [];
+			const messagingExtensionFactories =
+				createMessagingExtensionFactories({
+					chatId,
+					deliveryRegistry,
+					deliveryMessages: outboundMessages,
+				});
 			const session = await createAgentSession(chatId, phiConfig, {
 				sessionManager: SessionManager.inMemory(),
 				extensionFactories: messagingExtensionFactories,
@@ -247,9 +225,6 @@ export function createDefaultCronServiceDependencies(
 						session.sessionManager.buildSessionContext().messages
 					);
 				}
-				if (!deliveryRegistry) {
-					return;
-				}
 				for (const message of result.outboundMessages) {
 					await deliveryRegistry.require(chatId).deliver(message);
 				}
@@ -295,7 +270,7 @@ class ChatCronScheduler {
 		private readonly phiConfig: PhiConfig,
 		private readonly runtime: ChatSessionRuntime<AgentSession>,
 		private readonly chatExecutor: ChatExecutor,
-		private readonly deliveryRegistry: PhiRouteDeliveryRegistry | undefined,
+		private readonly deliveryRegistry: PhiRouteDeliveryRegistry,
 		private readonly dependencies: CronServiceDependencies
 	) {}
 
@@ -521,14 +496,12 @@ class ChatCronScheduler {
 			session.agent.replaceMessages(
 				session.sessionManager.buildSessionContext().messages
 			);
-			if (this.deliveryRegistry) {
-				await this.deliveryRegistry
-					.require(this.chatConfig.chatId)
-					.deliver({
-						text: `Cron job failed: ${message}`,
-						attachments: [],
-					});
-			}
+			await this.deliveryRegistry
+				.require(this.chatConfig.chatId)
+				.deliver({
+					text: `Cron job failed: ${message}`,
+					attachments: [],
+				});
 		});
 	}
 }
@@ -539,7 +512,7 @@ export async function startCronService(params: {
 	chatExecutor: ChatExecutor;
 	reloadRegistry: ChatReloadRegistry;
 	chatConfigs: ResolvedCronChatServiceConfig[];
-	deliveryRegistry?: PhiRouteDeliveryRegistry;
+	deliveryRegistry: PhiRouteDeliveryRegistry;
 	dependencies?: CronServiceDependencies;
 }): Promise<RunningCronService> {
 	const dependencies =

@@ -30,7 +30,7 @@ export interface ChatSessionBridgeSubmitParams {
 }
 
 export interface ChatSessionBridgeDependencies {
-	isMessagingManaged(): boolean;
+	messagingManaged: boolean;
 	onResolved(messages: PhiMessage[]): Promise<void>;
 }
 
@@ -214,7 +214,7 @@ export class ChatSessionBridge {
 		if (event.type !== "agent_end") {
 			return;
 		}
-		if (this.dependencies.isMessagingManaged()) {
+		if (this.dependencies.messagingManaged) {
 			return;
 		}
 		await this.dependencies.onResolved(

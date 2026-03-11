@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
@@ -207,7 +207,10 @@ function createAgentEndEvent(text: string): AgentSessionEvent {
 	} as unknown as AgentSessionEvent;
 }
 
-function createFakeRuntime(responseText: string): {
+function createFakeRuntime(
+	responseText: string,
+	deliveryRegistry?: PhiRouteDeliveryRegistry
+): {
 	runtime: ChatSessionRuntime<AgentSession>;
 	state: FakeRuntimeState;
 } {
@@ -235,6 +238,12 @@ function createFakeRuntime(responseText: string): {
 				prompt: content,
 				deliverAs: options?.deliverAs,
 			});
+			if (deliveryRegistry && responseText !== "NO_REPLY") {
+				await deliveryRegistry.require(currentChatId).deliver({
+					text: responseText,
+					attachments: [],
+				});
+			}
 			listener?.(createAssistantTurnEndEvent(responseText));
 			listener?.(createAgentEndEvent(responseText));
 		},
@@ -253,6 +262,19 @@ function createFakeRuntime(responseText: string): {
 	};
 
 	return { runtime, state };
+}
+
+function createManagedRuntime(responseText: string): {
+	runtime: ChatSessionRuntime<AgentSession>;
+	state: FakeRuntimeState;
+	deliveryRegistry: PhiRouteDeliveryRegistry;
+} {
+	const deliveryRegistry = new PhiRouteDeliveryRegistry();
+	const { runtime, state } = createFakeRuntime(
+		responseText,
+		deliveryRegistry
+	);
+	return { runtime, state, deliveryRegistry };
 }
 
 let nextUpdateId = 1;
@@ -498,7 +520,8 @@ describe("telegram service", () => {
 				},
 			}),
 		]);
-		const { runtime, state } = createFakeRuntime("assistant reply");
+		const { runtime, state, deliveryRegistry } =
+			createManagedRuntime("assistant reply");
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -508,7 +531,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 		await running.done;
 
@@ -556,7 +580,8 @@ describe("telegram service", () => {
 			contentType: "application/pdf",
 		});
 		const route = createRouteTarget("user-alice");
-		const { runtime, state } = createFakeRuntime("assistant reply");
+		const { runtime, state, deliveryRegistry } =
+			createManagedRuntime("assistant reply");
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -566,7 +591,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 		await running.done;
 
@@ -625,7 +651,8 @@ describe("telegram service", () => {
 			contentType: "image/jpeg",
 		});
 		const route = createRouteTarget("user-alice");
-		const { runtime, state } = createFakeRuntime("assistant reply");
+		const { runtime, state, deliveryRegistry } =
+			createManagedRuntime("assistant reply");
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -635,7 +662,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 		await running.done;
 
@@ -685,7 +713,8 @@ describe("telegram service", () => {
 			contentType: "image/jpeg",
 		});
 		const route = createRouteTarget("user-alice");
-		const { runtime, state } = createFakeRuntime("assistant reply");
+		const { runtime, state, deliveryRegistry } =
+			createManagedRuntime("assistant reply");
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -695,7 +724,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 		await running.done;
 
@@ -767,11 +797,14 @@ describe("telegram service", () => {
 						listener?.(createUserMessageStartEvent("m2"));
 						listener?.(createAssistantTurnEndEvent("second reply"));
 					}
-					listener?.(
-						createAgentEndEvent(
-							secondQueued ? "second reply" : "first reply"
-						)
-					);
+					const finalReply = secondQueued
+						? "second reply"
+						: "first reply";
+					await deliveryRegistry.require("user-alice").deliver({
+						text: finalReply,
+						attachments: [],
+					});
+					listener?.(createAgentEndEvent(finalReply));
 					streaming = false;
 					return;
 				}
@@ -780,6 +813,7 @@ describe("telegram service", () => {
 			dispose(): void {},
 		} as unknown as AgentSession;
 
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 		const runtime: ChatSessionRuntime<AgentSession> = {
 			async getOrCreateSession() {
 				return session;
@@ -811,7 +845,8 @@ describe("telegram service", () => {
 					"7": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		for (let attempt = 0; attempt < 10 && calls.length < 2; attempt += 1) {
@@ -834,6 +869,8 @@ describe("telegram service", () => {
 
 	it("delivers only the final assistant turn after tool retries", async () => {
 		let listener: ((event: AgentSessionEvent) => void) | undefined;
+		const fakeBot = new FakeTelegramBot([createContext()]);
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 		const session = {
 			isStreaming: false,
 			subscribe(handler: (event: AgentSessionEvent) => void) {
@@ -846,6 +883,10 @@ describe("telegram service", () => {
 				listener?.(createUserMessageStartEvent("hello"));
 				listener?.(createAssistantTurnEndEvent("I will handle it."));
 				listener?.(createAssistantTurnEndEvent("done"));
+				await deliveryRegistry.require("user-alice").deliver({
+					text: "done",
+					attachments: [],
+				});
 				listener?.(createAgentEndEvent("done"));
 			},
 			dispose(): void {},
@@ -859,7 +900,6 @@ describe("telegram service", () => {
 				return true;
 			},
 		};
-		const fakeBot = new FakeTelegramBot([createContext()]);
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -869,7 +909,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -890,6 +931,7 @@ describe("telegram service", () => {
 			}),
 		]);
 		const { runtime, state } = createFakeRuntime("unused");
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -899,7 +941,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -920,6 +963,7 @@ describe("telegram service", () => {
 			}),
 		]);
 		const { runtime, state } = createFakeRuntime("unused");
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -929,7 +973,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -955,6 +1000,7 @@ describe("telegram service", () => {
 				return true;
 			},
 		};
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -964,7 +1010,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -993,6 +1040,7 @@ describe("telegram service", () => {
 				return true;
 			},
 		};
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -1002,7 +1050,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -1014,7 +1063,7 @@ describe("telegram service", () => {
 	it("sanitizes and chunks long assistant replies", async () => {
 		const fakeBot = new FakeTelegramBot([createContext()]);
 		const longText = `${"a".repeat(4200)}\u0001${"b".repeat(120)}`;
-		const { runtime } = createFakeRuntime(longText);
+		const { runtime, deliveryRegistry } = createManagedRuntime(longText);
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -1024,7 +1073,8 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -1040,7 +1090,8 @@ describe("telegram service", () => {
 
 	it("skips duplicate updates after processed state in logs", async () => {
 		const route = createRouteTarget("user-alice");
-		const { runtime, state } = createFakeRuntime("assistant reply");
+		const { runtime, state, deliveryRegistry } =
+			createManagedRuntime("assistant reply");
 		const fakeBot = new FakeTelegramBot([
 			createContext({
 				updateId: 100,
@@ -1064,7 +1115,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -1076,12 +1128,10 @@ describe("telegram service", () => {
 		expect(fakeBot.sentTexts[0]?.replyToMessageId).toBeUndefined();
 
 		const logsContent = readCapturedLogs();
-		expect(logsContent.includes('"direction":"outbound"')).toBe(true);
-		expect(logsContent.includes('"source":"assistant"')).toBe(true);
 		const auditLines = logsContent
 			.split("\n")
 			.filter((line) => line.includes('"category":"audit"'));
-		expect(auditLines).toHaveLength(2);
+		expect(auditLines).toHaveLength(1);
 	});
 
 	it("allows retrying the same update after a failed attempt", async () => {
@@ -1096,8 +1146,11 @@ describe("telegram service", () => {
 				message: { id: 1, text: "hello", attachments: [] },
 			}),
 		]);
-		const { runtime: successRuntime, state } =
-			createFakeRuntime("assistant reply");
+		const {
+			runtime: successRuntime,
+			state,
+			deliveryRegistry,
+		} = createManagedRuntime("assistant reply");
 		let attempt = 0;
 
 		const runtime: ChatSessionRuntime<AgentSession> = {
@@ -1121,7 +1174,8 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
@@ -1194,6 +1248,7 @@ describe("telegram service", () => {
 				},
 			}),
 		]);
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -1203,45 +1258,18 @@ describe("telegram service", () => {
 					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			deliveryRegistry
 		);
 
 		await running.done;
 		expect(typingCalls).toBeGreaterThan(0);
 	});
 
-	it("delivers literal NO_REPLY as plain assistant text without messaging extension", async () => {
-		const fakeBot = new FakeTelegramBot([createContext()]);
-		const { runtime } = createFakeRuntime("NO_REPLY");
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot }
-		);
-
-		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
-			{
-				chatId: "42",
-				text: "NO_REPLY",
-				replyToMessageId: undefined,
-			},
-		]);
-	});
-
 	it("skips fallback final delivery when messaging is extension-managed", async () => {
 		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
 			isStreaming: false,
-			getAllTools() {
-				return [{ name: "send" }];
-			},
 			subscribe(handler: (event: AgentSessionEvent) => void) {
 				listener = handler;
 				return () => {
@@ -1278,99 +1306,5 @@ describe("telegram service", () => {
 
 		await running.done;
 		expect(fakeBot.sentTexts).toEqual([]);
-	});
-
-	it("re-evaluates messaging mode after workspace config changes", async () => {
-		const route = createRouteTarget("user-alice");
-		const listenerBySession = new Map<
-			number,
-			(event: AgentSessionEvent) => void
-		>();
-		const sessionOne = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listenerBySession.set(1, handler);
-				return () => {
-					listenerBySession.delete(1);
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				listenerBySession.get(1)?.(
-					createAssistantTurnEndEvent("first")
-				);
-				listenerBySession.get(1)?.(createAgentEndEvent("first"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		const sessionTwo = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listenerBySession.set(2, handler);
-				return () => {
-					listenerBySession.delete(2);
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				listenerBySession.get(2)?.(
-					createAssistantTurnEndEvent("second")
-				);
-				listenerBySession.get(2)?.(createAgentEndEvent("second"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		let getSessionCalls = 0;
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				getSessionCalls += 1;
-				if (getSessionCalls === 1) {
-					return sessionOne;
-				}
-				writeFileSync(
-					join(route.workspace, ".phi", "config.yaml"),
-					[
-						"version: 1",
-						"extensions:",
-						"  disabled:",
-						"    - messaging",
-					].join("\n"),
-					"utf-8"
-				);
-				return sessionTwo;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				chat: { id: 42 },
-				message: { id: 10, text: "m1", attachments: [] },
-			}),
-			createContext({
-				chat: { id: 42 },
-				message: { id: 11, text: "m2", attachments: [] },
-			}),
-		]);
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": route,
-				},
-			},
-			{ createBot: () => fakeBot },
-			new PhiRouteDeliveryRegistry()
-		);
-
-		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
-			{
-				chatId: "42",
-				text: "second",
-				replyToMessageId: undefined,
-			},
-		]);
 	});
 });

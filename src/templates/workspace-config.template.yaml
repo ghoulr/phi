@@ -34,9 +34,3 @@ skills:
     example-skill:
       env:
         EXAMPLE_API_KEY: your-api-key
-
-extensions:
-  # Disable phi-owned optional extensions for this workspace.
-  # disabled:
-  #   - messaging
-  #   - memory-maintenance

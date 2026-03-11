@@ -15,6 +15,7 @@ import { getPhiLogger } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
 import { startCronService, type RunningCronService } from "@phi/cron/service";
+import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
 import {
 	startTelegramPollingBot,
 	type ResolvedTelegramPollingBotConfig,
@@ -36,16 +37,19 @@ export interface ServiceCommandDependencies {
 	resolveCronChats(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[];
 	createChatExecutor(): ChatExecutor;
 	createReloadRegistry(): ChatReloadRegistry;
+	createDeliveryRegistry(): PhiRouteDeliveryRegistry;
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig
+		config: ResolvedTelegramPollingBotConfig,
+		deliveryRegistry: PhiRouteDeliveryRegistry
 	): Promise<RunningTelegramPollingBot>;
 	startCronRuntime(
 		runtime: ChatSessionRuntime<AgentSession>,
 		phiConfig: PhiConfig,
 		chatConfigs: ResolvedCronChatServiceConfig[],
 		chatExecutor: ChatExecutor,
-		reloadRegistry: ChatReloadRegistry
+		reloadRegistry: ChatReloadRegistry,
+		deliveryRegistry: PhiRouteDeliveryRegistry
 	): Promise<RunningCronService>;
 }
 
@@ -64,18 +68,28 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	createReloadRegistry(): ChatReloadRegistry {
 		return new ChatReloadRegistry();
 	},
+	createDeliveryRegistry(): PhiRouteDeliveryRegistry {
+		return new PhiRouteDeliveryRegistry();
+	},
 	startTelegramBot(
 		runtime: ChatSessionRuntime<AgentSession>,
-		config: ResolvedTelegramPollingBotConfig
+		config: ResolvedTelegramPollingBotConfig,
+		deliveryRegistry: PhiRouteDeliveryRegistry
 	): Promise<RunningTelegramPollingBot> {
-		return startTelegramPollingBot(runtime, config);
+		return startTelegramPollingBot(
+			runtime,
+			config,
+			undefined,
+			deliveryRegistry
+		);
 	},
 	startCronRuntime(
 		runtime: ChatSessionRuntime<AgentSession>,
 		phiConfig: PhiConfig,
 		chatConfigs: ResolvedCronChatServiceConfig[],
 		chatExecutor: ChatExecutor,
-		reloadRegistry: ChatReloadRegistry
+		reloadRegistry: ChatReloadRegistry,
+		deliveryRegistry: PhiRouteDeliveryRegistry
 	): Promise<RunningCronService> {
 		return startCronService({
 			runtime,
@@ -83,6 +97,7 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 			chatConfigs,
 			chatExecutor,
 			reloadRegistry,
+			deliveryRegistry,
 		});
 	},
 };
@@ -140,6 +155,7 @@ export async function runServiceCommand(
 	const cronChats = resolvedDependencies.resolveCronChats(phiConfig);
 	const chatExecutor = resolvedDependencies.createChatExecutor();
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
+	const deliveryRegistry = resolvedDependencies.createDeliveryRegistry();
 	log.info("service.command.starting", {
 		telegramChatCount: telegramChats.length,
 		cronChatCount: cronChats.length,
@@ -153,7 +169,8 @@ export async function runServiceCommand(
 			phiConfig,
 			cronChats,
 			chatExecutor,
-			reloadRegistry
+			reloadRegistry,
+			deliveryRegistry
 		);
 		runningServices.push(cronRuntime);
 		log.info("service.cron.started", {
@@ -166,7 +183,8 @@ export async function runServiceCommand(
 			});
 			const runningBot = await resolvedDependencies.startTelegramBot(
 				runtime,
-				botConfig
+				botConfig,
+				deliveryRegistry
 			);
 			runningServices.push(runningBot);
 			log.info("service.telegram.started", {

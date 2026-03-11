@@ -14,10 +14,6 @@ import {
 
 import { applyInlineExtensionLabels } from "@phi/core/inline-extension-labels";
 import {
-	createEnabledPhiOwnedExtensionFactories,
-	PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
-} from "@phi/core/phi-extensions";
-import {
 	getPhiPiMemoryFilePath,
 	getPhiSharedAuthFilePath,
 } from "@phi/core/paths";
@@ -27,10 +23,6 @@ import {
 	resolvePhiGlobalSkillPaths,
 } from "@phi/core/skills";
 import { installPhiSystemPrompt } from "@phi/core/system-prompt";
-import {
-	loadPhiWorkspaceConfig,
-	resolveWorkspaceDisabledExtensionIds,
-} from "@phi/core/workspace-config";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
@@ -63,24 +55,11 @@ export async function createDefaultTuiSession(
 		join(agentDir, "models.json")
 	);
 	const skillPaths = resolvePhiGlobalSkillPaths(userHomeDir);
-	const workspaceConfigFilePath = join(cwd, ".phi", "config.yaml");
-	const workspaceConfig = loadPhiWorkspaceConfig(workspaceConfigFilePath);
-	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
-		workspaceConfig,
-		workspaceConfigFilePath
-	);
-	const extensionFactories = createEnabledPhiOwnedExtensionFactories({
-		disabledExtensionIds,
-		definitions: [
-			{
-				id: PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
-				create: () =>
-					createPhiMemoryMaintenanceExtension({
-						memoryFilePath,
-					}),
-			},
-		],
-	});
+	const extensionFactories = [
+		createPhiMemoryMaintenanceExtension({
+			memoryFilePath,
+		}),
+	];
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,

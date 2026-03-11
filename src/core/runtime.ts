@@ -38,14 +38,7 @@ import {
 	createPhiSkillsOverride,
 	resolvePhiSkillPaths,
 } from "@phi/core/skills";
-import {
-	createEnabledPhiOwnedExtensionFactories,
-	PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
-} from "@phi/core/phi-extensions";
-import {
-	loadPhiWorkspaceConfig,
-	resolveWorkspaceDisabledExtensionIds,
-} from "@phi/core/workspace-config";
+import { loadPhiWorkspaceConfig } from "@phi/core/workspace-config";
 import { installPhiSystemPrompt } from "@phi/core/system-prompt";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 
@@ -86,7 +79,6 @@ async function createPhiResourceLoader(params: {
 	cwd: string;
 	agentDir: string;
 	userHomeDir?: string;
-	disabledExtensionIds: readonly string[];
 	extensionFactories?: ExtensionFactory[];
 }): Promise<DefaultResourceLoader> {
 	const userHomeDir = params.userHomeDir ?? homedir();
@@ -100,17 +92,8 @@ async function createPhiResourceLoader(params: {
 		userHomeDir,
 	});
 	const extensionFactories = [
-		...createEnabledPhiOwnedExtensionFactories({
-			disabledExtensionIds: params.disabledExtensionIds,
-			definitions: [
-				{
-					id: PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
-					create: () =>
-						createPhiMemoryMaintenanceExtension({
-							memoryFilePath: ".phi/memory/MEMORY.md",
-						}),
-				},
-			],
+		createPhiMemoryMaintenanceExtension({
+			memoryFilePath: ".phi/memory/MEMORY.md",
 		}),
 		...(params.extensionFactories ?? []),
 	];
@@ -154,10 +137,6 @@ async function resolvePhiSessionContext(
 	const workspaceConfig = loadPhiWorkspaceConfig(
 		chatWorkspaceLayout.configFilePath
 	);
-	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
-		workspaceConfig,
-		chatWorkspaceLayout.configFilePath
-	);
 
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const agentConfig = resolveAgentRuntimeConfig(
@@ -182,7 +161,6 @@ async function resolvePhiSessionContext(
 		cwd: chatWorkspaceDir,
 		agentDir,
 		userHomeDir,
-		disabledExtensionIds,
 		extensionFactories: options.extensionFactories,
 	});
 	log.info("runtime.session_context.resolved", {

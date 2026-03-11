@@ -275,6 +275,7 @@ describe("startCronService", () => {
 
 		const service = await startCronService({
 			runtime,
+			deliveryRegistry: new PhiRouteDeliveryRegistry(),
 			phiConfig: {
 				chats: {
 					alice: {
@@ -336,6 +337,7 @@ describe("startCronService", () => {
 		let runCalls = 0;
 		const reloadRegistry = new ChatReloadRegistry();
 		const service = await startCronService({
+			deliveryRegistry: new PhiRouteDeliveryRegistry(),
 			runtime: {
 				async getOrCreateSession(): Promise<AgentSession> {
 					throw new Error(

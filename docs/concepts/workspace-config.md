@@ -17,7 +17,6 @@ Agents do not modify it.
 - `chat.*` — chat-local settings such as timezone
 - `cron.*` — cron enablement and job metadata
 - `skills.entries.<name>.env` — per-skill environment variables
-- `extensions.disabled` — disabled phi-owned optional extensions
 
 ## How agents use it
 
@@ -27,15 +26,6 @@ Agents do not modify it.
 
 Skill file creation and edits do not need `reload`.
 New sessions discover the updated skill set automatically.
-
-Example:
-
-```yaml
-extensions:
-  disabled:
-    - messaging
-    - memory-maintenance
-```
 
 ## Reload
 
