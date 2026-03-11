@@ -18,7 +18,7 @@ import {
 	type ChatHandlerInteractiveInput,
 } from "@phi/services/routes";
 import {
-	buildTelegramSystemReminderMetadata,
+	buildTelegramMessageMetadata,
 	startTelegramPollingBot,
 	type TelegramPollingBot,
 	type TelegramRouteTarget,
@@ -197,7 +197,7 @@ function createContext(
 			id: 10,
 			text: "hello",
 			attachments: [],
-			systemReminderMetadata: {
+			metadata: {
 				current_message: {
 					message_id: 10,
 				},
@@ -206,8 +206,8 @@ function createContext(
 		sendTyping: async () => ({ ok: true }),
 	};
 	const mergedMessage = { ...base.message, ...overrides?.message };
-	if (!mergedMessage.systemReminderMetadata) {
-		mergedMessage.systemReminderMetadata = {
+	if (!mergedMessage.metadata) {
+		mergedMessage.metadata = {
 			current_message: {
 				message_id: mergedMessage.id,
 			},
@@ -232,8 +232,8 @@ afterEach(() => {
 });
 
 describe("telegram service", () => {
-	it("builds reminder metadata from reply_to_message", () => {
-		const metadata = buildTelegramSystemReminderMetadata({
+	it("builds message metadata from reply_to_message", () => {
+		const metadata = buildTelegramMessageMetadata({
 			message_id: 10,
 			date: 0,
 			chat: { id: 42, type: "private" },
@@ -290,8 +290,8 @@ describe("telegram service", () => {
 		});
 	});
 
-	it("builds reminder metadata from external_reply and quote", () => {
-		const metadata = buildTelegramSystemReminderMetadata({
+	it("builds message metadata from external_reply and quote", () => {
+		const metadata = buildTelegramMessageMetadata({
 			message_id: 10,
 			date: 0,
 			chat: { id: 42, type: "private" },
@@ -347,8 +347,8 @@ describe("telegram service", () => {
 		});
 	});
 
-	it("builds reminder metadata from forward_origin", () => {
-		const metadata = buildTelegramSystemReminderMetadata({
+	it("builds message metadata from forward_origin", () => {
+		const metadata = buildTelegramMessageMetadata({
 			message_id: 10,
 			date: 0,
 			chat: { id: 42, type: "private" },
@@ -437,7 +437,6 @@ describe("telegram service", () => {
 							fileId: "doc-1",
 							fileName: "report.pdf",
 							mimeType: "application/pdf",
-							kind: "file",
 						},
 					],
 				},
@@ -489,7 +488,6 @@ describe("telegram service", () => {
 						{
 							fileId: "photo-1",
 							mimeType: "image/jpeg",
-							kind: "image",
 						},
 					],
 				},
@@ -549,7 +547,6 @@ describe("telegram service", () => {
 						{
 							fileId: "photo-1",
 							mimeType: "image/jpeg",
-							kind: "image",
 						},
 					],
 				},

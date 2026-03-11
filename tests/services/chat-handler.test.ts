@@ -22,18 +22,6 @@ import {
 } from "@phi/services/chat-handler";
 import { ServiceRoutes } from "@phi/services/routes";
 
-function createAgentEndEvent(text: string): AgentSessionEvent {
-	return {
-		type: "agent_end",
-		messages: [
-			{
-				role: "assistant",
-				content: [{ type: "text", text }],
-			},
-		],
-	} as unknown as AgentSessionEvent;
-}
-
 function createMessageUpdateEvent(
 	type: "thinking_delta" | "text_delta"
 ): AgentSessionEvent {
@@ -197,70 +185,13 @@ function createFakeCronSessionFactory(params: {
 }
 
 describe("chat handler", () => {
-	it("delivers fallback assistant text when messaging is not managed", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
+	it("does not deliver assistant text directly from interactive sessions", async () => {
 		const session = {
 			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
+			subscribe(_handler: (event: AgentSessionEvent) => void) {
+				return () => {};
 			},
-			async sendUserMessage(): Promise<void> {
-				listener?.(createAgentEndEvent("NO_REPLY"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const routes = new ServiceRoutes();
-		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
-			async deliver(message): Promise<void> {
-				delivered.push(message.text ?? "");
-			},
-		});
-
-		const handler = new PiChatHandler({
-			chatId: "alice",
-			phiConfig: {
-				chats: { alice: { workspace: "~/alice", agent: "main" } },
-			},
-			runtime,
-			chatExecutor: createImmediateExecutor(),
-			routes,
-			dependencies: { messagingManaged: false },
-		});
-
-		await handler.submitInteractive({
-			text: "hello",
-			attachments: [],
-			sendTyping: async () => ({ ok: true }),
-		});
-
-		expect(delivered).toEqual(["NO_REPLY"]);
-	});
-
-	it("skips fallback assistant delivery when messaging is managed", async () => {
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				listener?.(createAgentEndEvent("done"));
-			},
+			async sendUserMessage(): Promise<void> {},
 			dispose(): void {},
 		} as unknown as AgentSession;
 		const runtime: ChatSessionRuntime<AgentSession> = {
@@ -330,7 +261,6 @@ describe("chat handler", () => {
 				runtime,
 				chatExecutor: createImmediateExecutor(),
 				routes: new ServiceRoutes(),
-				dependencies: { messagingManaged: false },
 			});
 
 			await handler.submitInteractive({
@@ -405,7 +335,6 @@ describe("chat handler", () => {
 					if (secondQueued) {
 						listener?.(createMessageUpdateEvent("text_delta"));
 					}
-					listener?.(createAgentEndEvent("done"));
 					streaming = false;
 					return;
 				}
@@ -429,7 +358,6 @@ describe("chat handler", () => {
 			runtime,
 			chatExecutor: createImmediateExecutor(),
 			routes: new ServiceRoutes(),
-			dependencies: { messagingManaged: false },
 		});
 
 		const first = handler.submitInteractive({

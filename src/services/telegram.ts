@@ -42,7 +42,6 @@ export interface TelegramInboundAttachment {
 	fileId: string;
 	fileName?: string;
 	mimeType?: string;
-	kind: "image" | "file";
 }
 
 interface DownloadedTelegramFile {
@@ -58,7 +57,7 @@ export interface TelegramTextMessageContext {
 		id: number | string;
 		text?: string;
 		attachments: TelegramInboundAttachment[];
-		systemReminderMetadata?: Record<string, unknown>;
+		metadata?: Record<string, unknown>;
 	};
 	sendTyping(): Promise<unknown>;
 }
@@ -209,7 +208,7 @@ function buildTelegramInboundLogText(message: {
 		return "";
 	}
 	const attachmentNames = message.attachments.map((attachment, index) => {
-		return attachment.fileName ?? `${attachment.kind}-${String(index + 1)}`;
+		return attachment.fileName ?? `attachment-${String(index + 1)}`;
 	});
 	return `[attachments: ${attachmentNames.join(", ")}]`;
 }
@@ -385,7 +384,7 @@ function buildTelegramQuoteMetadata(
 	};
 }
 
-export function buildTelegramSystemReminderMetadata(
+export function buildTelegramMessageMetadata(
 	message: Message | undefined
 ): Record<string, unknown> | undefined {
 	if (!message) {
@@ -444,7 +443,6 @@ async function saveTelegramInboundAttachment(params: {
 		telegramChatId: params.telegramChatId,
 		telegramMessageId: params.telegramMessageId,
 		telegramUpdateId: String(params.updateId),
-		attachmentKind: params.attachment.kind,
 		attachmentPath: absolutePath,
 		attachmentSizeBytes: downloaded.data.byteLength,
 	});
@@ -655,7 +653,6 @@ class GrammyPollingBot implements TelegramPollingBot {
 				if (largestPhoto?.file_id) {
 					attachments.push({
 						fileId: largestPhoto.file_id,
-						kind: "image",
 						mimeType: "image/jpeg",
 					});
 				}
@@ -667,11 +664,6 @@ class GrammyPollingBot implements TelegramPollingBot {
 					fileId: document.file_id,
 					fileName: document.file_name,
 					mimeType: document.mime_type,
-					kind:
-						typeof document.mime_type === "string" &&
-						document.mime_type.startsWith("image/")
-							? "image"
-							: "file",
 				});
 			}
 			const text =
@@ -680,9 +672,7 @@ class GrammyPollingBot implements TelegramPollingBot {
 					: typeof message.caption === "string"
 						? message.caption
 						: undefined;
-			const systemReminderMetadata = buildTelegramSystemReminderMetadata(
-				message as Message
-			);
+			const metadata = buildTelegramMessageMetadata(message as Message);
 			if (!text && attachments.length === 0) {
 				return;
 			}
@@ -693,7 +683,7 @@ class GrammyPollingBot implements TelegramPollingBot {
 					id: message.message_id,
 					text,
 					attachments,
-					systemReminderMetadata,
+					metadata,
 				},
 				sendTyping: async () => {
 					return context.api.sendChatAction(chat.id, "typing");
@@ -897,7 +887,7 @@ async function submitTelegramTextMessage(
 		await routes.dispatchInteractive(endpointId, telegramChatId, {
 			text: context.message.text,
 			attachments,
-			metadata: context.message.systemReminderMetadata,
+			metadata: context.message.metadata,
 			sendTyping: context.sendTyping,
 		});
 		log.info("telegram.message.completed", {

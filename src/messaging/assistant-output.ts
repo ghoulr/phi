@@ -1,7 +1,5 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
-import type { PhiMessage } from "@phi/messaging/types";
-
 function extractAssistantText(message: AgentMessage): string | undefined {
 	if (message.role !== "assistant") {
 		return undefined;
@@ -42,14 +40,4 @@ export function extractLastAssistantText(
 		}
 	}
 	return undefined;
-}
-
-export function resolvePlainAssistantMessage(
-	assistantText: string | undefined
-): PhiMessage[] {
-	const text = assistantText?.trim();
-	if (!text) {
-		return [];
-	}
-	return [{ text, attachments: [] }];
 }

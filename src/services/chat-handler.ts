@@ -22,10 +22,6 @@ import {
 } from "@phi/core/runtime";
 import { createPhiMessagingExtension } from "@phi/extensions/messaging";
 import {
-	extractLastAssistantText,
-	resolvePlainAssistantMessage,
-} from "@phi/messaging/assistant-output";
-import {
 	appendPhiSystemReminderToUserContent,
 	buildPhiSystemReminder,
 } from "@phi/messaging/system-reminder";
@@ -64,12 +60,7 @@ interface PendingSubmit {
 	typingNotifier: TypingNotifier;
 }
 
-interface ChatSessionBridgeDependencies {
-	messagingManaged: boolean;
-	onResolved(messages: PhiMessage[]): Promise<void>;
-}
-
-interface ChatSessionBridgeSubmitParams {
+interface InteractiveSessionSubmitParams {
 	content: string | (TextContent | ImageContent)[];
 	sendTyping(): Promise<unknown>;
 }
@@ -251,28 +242,26 @@ function buildCronAgentContent(input: ChatHandlerCronInput): string {
 }
 
 function createPendingSubmit(
-	params: Pick<ChatSessionBridgeSubmitParams, "sendTyping">
+	sendTyping: () => Promise<unknown>
 ): PendingSubmit {
 	return {
-		typingNotifier: createTypingNotifier(params.sendTyping),
+		typingNotifier: createTypingNotifier(sendTyping),
 	};
 }
 
-class ChatSessionBridge {
+class InteractiveSession {
 	private session: AgentSession | undefined;
 	private unsubscribe: (() => void) | undefined;
 	private readonly submitLock = new AsyncLock();
 	private readonly pendingSubmissions: PendingSubmit[] = [];
-	private eventQueue = Promise.resolve();
 
 	public constructor(
 		private readonly runtime: ChatSessionRuntime<AgentSession>,
-		private readonly chatId: string,
-		private readonly dependencies: ChatSessionBridgeDependencies
+		private readonly chatId: string
 	) {}
 
-	public async submit(params: ChatSessionBridgeSubmitParams): Promise<void> {
-		const submit = createPendingSubmit(params);
+	public async submit(params: InteractiveSessionSubmitParams): Promise<void> {
+		const submit = createPendingSubmit(params.sendTyping);
 		let session: AgentSession | undefined;
 		let sendPromise: Promise<void> | undefined;
 
@@ -333,10 +322,7 @@ class ChatSessionBridge {
 		this.detachSession();
 		this.session = session;
 		this.unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-			this.eventQueue = this.eventQueue.then(
-				async () => await this.handleSessionEvent(event),
-				async () => await this.handleSessionEvent(event)
-			);
+			this.handleSessionEvent(event);
 		});
 	}
 
@@ -346,22 +332,10 @@ class ChatSessionBridge {
 		this.session = undefined;
 	}
 
-	private async handleSessionEvent(event: AgentSessionEvent): Promise<void> {
+	private handleSessionEvent(event: AgentSessionEvent): void {
 		if (shouldShowTypingForEvent(event)) {
 			this.pendingSubmissions.at(-1)?.typingNotifier.notify();
-			return;
 		}
-		if (event.type !== "agent_end") {
-			return;
-		}
-		if (this.dependencies.messagingManaged) {
-			return;
-		}
-		await this.dependencies.onResolved(
-			resolvePlainAssistantMessage(
-				extractLastAssistantText(event.messages)
-			)
-		);
 	}
 
 	private removePendingSubmit(submit: PendingSubmit): void {
@@ -485,7 +459,6 @@ export interface ChatHandler {
 
 export interface PiChatHandlerDependencies {
 	createCronSession?: typeof createPhiAgentSession;
-	messagingManaged?: boolean;
 }
 
 export interface CreatePiChatHandlerParams {
@@ -505,26 +478,22 @@ export function createServiceSessionExtensionFactories(
 }
 
 export class PiChatHandler implements ChatHandler {
-	private readonly bridge: ChatSessionBridge;
+	private readonly interactiveSession: InteractiveSession;
 	private readonly createCronSession: typeof createPhiAgentSession;
 
 	public constructor(private readonly params: CreatePiChatHandlerParams) {
 		this.createCronSession =
 			params.dependencies?.createCronSession ?? createPhiAgentSession;
-		this.bridge = new ChatSessionBridge(params.runtime, params.chatId, {
-			messagingManaged: params.dependencies?.messagingManaged ?? true,
-			onResolved: async (messages) => {
-				for (const message of messages) {
-					await params.routes.deliverOutbound(params.chatId, message);
-				}
-			},
-		});
+		this.interactiveSession = new InteractiveSession(
+			params.runtime,
+			params.chatId
+		);
 	}
 
 	public async submitInteractive(
 		input: ChatHandlerInteractiveInput
 	): Promise<void> {
-		await this.bridge.submit({
+		await this.interactiveSession.submit({
 			content: buildInteractiveAgentContent(input),
 			sendTyping: input.sendTyping,
 		});
@@ -562,11 +531,11 @@ export class PiChatHandler implements ChatHandler {
 	}
 
 	public invalidate(): void {
-		this.bridge.invalidate();
+		this.interactiveSession.invalidate();
 	}
 
 	public dispose(): void {
-		this.bridge.dispose();
+		this.interactiveSession.dispose();
 	}
 
 	private async publishCronResult(
