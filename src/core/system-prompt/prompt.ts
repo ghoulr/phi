@@ -14,7 +14,6 @@ export interface BuildPhiSystemPromptParams {
 	skills: Skill[];
 	memoryFilePath: string;
 	toolNames: string[];
-	eventText?: string;
 	includeWorkspaceConfigGuidance?: boolean;
 }
 
@@ -179,17 +178,13 @@ function buildWorkspaceSection(params: {
 	return lines.join("\n");
 }
 
-function buildMessageFormatSection(eventText: string): string {
-	const lines = [
+function buildMessageFormatSection(): string {
+	return [
 		"- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context",
 		"- it is not user-authored input; it only carries metadata for the current message",
 		"- the user message body is still the real input",
 		"- NEVER mention <system-reminder> to user, it's internal",
-	];
-	if (eventText) {
-		lines.push("", eventText);
-	}
-	return lines.join("\n");
+	].join("\n");
 }
 
 function buildMemorySection(params: {
@@ -220,7 +215,6 @@ export function buildPhiSystemPrompt(
 ): string {
 	const skillsText = buildSkillsText(params.skills);
 	const memoryText = readMemoryText(params.memoryFilePath);
-	const eventText = params.eventText?.trim() ?? "";
 	const toolsText = buildToolsText(params.toolNames);
 	const toolGuidance = buildToolGuidance(params.toolNames);
 
@@ -256,10 +250,6 @@ export function buildPhiSystemPrompt(
 		}
 		lines.push("");
 	}
-	appendSection(
-		lines,
-		"## Message Format",
-		buildMessageFormatSection(eventText)
-	);
+	appendSection(lines, "## Message Format", buildMessageFormatSection());
 	return lines.join("\n").trim();
 }

@@ -38,13 +38,16 @@ import {
 	createPhiSkillsOverride,
 	resolvePhiSkillPaths,
 } from "@phi/core/skills";
-import { loadPhiWorkspaceConfig } from "@phi/core/workspace-config";
+import {
+	createEnabledPhiOwnedExtensionFactories,
+	PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
+} from "@phi/core/phi-extensions";
+import {
+	loadPhiWorkspaceConfig,
+	resolveWorkspaceDisabledExtensionIds,
+} from "@phi/core/workspace-config";
 import { installPhiSystemPrompt } from "@phi/core/system-prompt";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
-import {
-	registerPhiMessagingSessionState,
-	type PhiMessagingSessionState,
-} from "@phi/messaging/session-state";
 
 export {
 	ChatSessionPool,
@@ -53,25 +56,18 @@ export {
 	type DisposableSession,
 } from "@phi/core/chat-pool";
 
-const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
-
 const log = getPhiLogger("runtime");
 
 export interface CreatePhiAgentSessionOptions {
 	sessionManager?: SessionManager;
 	customTools?: ToolDefinition[];
 	extensionFactories?: ExtensionFactory[];
-	additionalPromptToolNames?: string[];
-	eventText?: string;
-	messagingState?: PhiMessagingSessionState;
 	printSystemPrompt?: boolean;
 }
 
 export interface PhiRuntimeDependencies {
 	getCustomTools?(chatId: string): ToolDefinition[];
 	getExtensionFactories?(chatId: string): ExtensionFactory[];
-	getAdditionalPromptToolNames?(chatId: string): string[];
-	getEventText?(chatId: string): string | undefined;
 }
 
 interface ResolvedPhiSessionContext {
@@ -82,6 +78,7 @@ interface ResolvedPhiSessionContext {
 	model: NonNullable<AgentSession["model"]>;
 	chatWorkspaceDir: string;
 	chatWorkspaceLayout: ReturnType<typeof ensureChatWorkspaceLayout>;
+	workspaceConfig: ReturnType<typeof loadPhiWorkspaceConfig>;
 	resourceLoader: DefaultResourceLoader;
 }
 
@@ -89,6 +86,7 @@ async function createPhiResourceLoader(params: {
 	cwd: string;
 	agentDir: string;
 	userHomeDir?: string;
+	disabledExtensionIds: readonly string[];
 	extensionFactories?: ExtensionFactory[];
 }): Promise<DefaultResourceLoader> {
 	const userHomeDir = params.userHomeDir ?? homedir();
@@ -102,8 +100,17 @@ async function createPhiResourceLoader(params: {
 		userHomeDir,
 	});
 	const extensionFactories = [
-		createPhiMemoryMaintenanceExtension({
-			memoryFilePath: ".phi/memory/MEMORY.md",
+		...createEnabledPhiOwnedExtensionFactories({
+			disabledExtensionIds: params.disabledExtensionIds,
+			definitions: [
+				{
+					id: PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
+					create: () =>
+						createPhiMemoryMaintenanceExtension({
+							memoryFilePath: ".phi/memory/MEMORY.md",
+						}),
+				},
+			],
 		}),
 		...(params.extensionFactories ?? []),
 	];
@@ -144,6 +151,13 @@ async function resolvePhiSessionContext(
 		userHomeDir
 	);
 	const chatWorkspaceLayout = ensureChatWorkspaceLayout(chatWorkspaceDir);
+	const workspaceConfig = loadPhiWorkspaceConfig(
+		chatWorkspaceLayout.configFilePath
+	);
+	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
+		workspaceConfig,
+		chatWorkspaceLayout.configFilePath
+	);
 
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const agentConfig = resolveAgentRuntimeConfig(
@@ -168,6 +182,7 @@ async function resolvePhiSessionContext(
 		cwd: chatWorkspaceDir,
 		agentDir,
 		userHomeDir,
+		disabledExtensionIds,
 		extensionFactories: options.extensionFactories,
 	});
 	log.info("runtime.session_context.resolved", {
@@ -186,21 +201,13 @@ async function resolvePhiSessionContext(
 		model,
 		chatWorkspaceDir,
 		chatWorkspaceLayout,
+		workspaceConfig,
 		resourceLoader,
 	};
 }
 
-function buildPromptToolNames(
-	customTools: ToolDefinition[] | undefined,
-	additionalToolNames: string[] | undefined
-): string[] {
-	return Array.from(
-		new Set([
-			...DEFAULT_PROMPT_TOOL_NAMES,
-			...(customTools ?? []).map((tool) => tool.name),
-			...(additionalToolNames ?? []),
-		])
-	);
+function getSessionToolNames(session: AgentSession): string[] {
+	return session.getAllTools().map((tool) => tool.name);
 }
 
 function printInjectedSystemPrompt(systemPrompt: string): void {
@@ -227,12 +234,9 @@ export async function createPhiAgentSession(
 		extensionFactories: options.extensionFactories,
 	});
 
-	const workspaceConfig = loadPhiWorkspaceConfig(
-		context.chatWorkspaceLayout.configFilePath
-	);
 	const envOverrides = resolveLoadedSkillEnvOverrides({
 		skills: context.resourceLoader.getSkills().skills,
-		workspaceConfig,
+		workspaceConfig: context.workspaceConfig,
 		configFilePath: context.chatWorkspaceLayout.configFilePath,
 	});
 	const restoreSkillEnv = applySkillEnvOverrides(envOverrides);
@@ -276,17 +280,10 @@ export async function createPhiAgentSession(
 		workspacePath: context.chatWorkspaceDir,
 		skills: context.resourceLoader.getSkills().skills,
 		memoryFilePath: context.chatWorkspaceLayout.memoryFilePath,
-		toolNames: buildPromptToolNames(
-			options.customTools,
-			options.additionalPromptToolNames
-		),
-		eventText: options.eventText,
+		toolNames: getSessionToolNames(session),
 	});
 	if (options.printSystemPrompt) {
 		printInjectedSystemPrompt(systemPrompt);
-	}
-	if (options.messagingState) {
-		registerPhiMessagingSessionState(session, options.messagingState);
 	}
 	log.info("runtime.session.created", {
 		chatId,
@@ -305,9 +302,6 @@ async function createDefaultAgentSession(
 	return await createPhiAgentSession(chatId, phiConfig, {
 		customTools: dependencies.getCustomTools?.(chatId) ?? [],
 		extensionFactories: dependencies.getExtensionFactories?.(chatId) ?? [],
-		additionalPromptToolNames:
-			dependencies.getAdditionalPromptToolNames?.(chatId) ?? [],
-		eventText: dependencies.getEventText?.(chatId),
 	});
 }
 

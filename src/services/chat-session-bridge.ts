@@ -1,4 +1,3 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type {
 	AgentSession,
@@ -8,10 +7,10 @@ import type {
 import { getPhiLogger } from "@phi/core/logger";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
 import {
-	getPhiMessagingSessionState,
-	resolvePhiSessionTurnOutput,
-} from "@phi/messaging/session-state";
-import type { PhiMessage, PhiMessageMention } from "@phi/messaging/types";
+	extractLastAssistantText,
+	resolvePlainAssistantMessage,
+} from "@phi/messaging/assistant-output";
+import type { PhiMessage } from "@phi/messaging/types";
 
 const TYPING_INTERVAL_MS = 2500;
 const log = getPhiLogger("chat-session-bridge");
@@ -27,11 +26,11 @@ interface PendingSubmit {
 
 export interface ChatSessionBridgeSubmitParams {
 	content: string | (TextContent | ImageContent)[];
-	sender?: PhiMessageMention;
 	sendTyping(): Promise<unknown>;
 }
 
 export interface ChatSessionBridgeDependencies {
+	isMessagingManaged(): boolean;
 	onResolved(messages: PhiMessage[]): Promise<void>;
 }
 
@@ -108,48 +107,6 @@ function shouldShowTypingForEvent(event: AgentSessionEvent): boolean {
 	}
 }
 
-function extractAssistantText(message: AgentMessage): string | undefined {
-	if (message.role !== "assistant") {
-		return undefined;
-	}
-	if (!Array.isArray(message.content)) {
-		return undefined;
-	}
-	const text = message.content
-		.map((part) => {
-			if (
-				typeof part !== "object" ||
-				part === null ||
-				!("type" in part) ||
-				part.type !== "text" ||
-				!("text" in part) ||
-				typeof part.text !== "string"
-			) {
-				return "";
-			}
-			return part.text;
-		})
-		.join("")
-		.trim();
-	return text.length > 0 ? text : undefined;
-}
-
-function extractLastAssistantText(
-	messages: AgentMessage[]
-): string | undefined {
-	for (let index = messages.length - 1; index >= 0; index -= 1) {
-		const message = messages[index];
-		if (!message) {
-			continue;
-		}
-		const text = extractAssistantText(message);
-		if (text) {
-			return text;
-		}
-	}
-	return undefined;
-}
-
 function createPendingSubmit(
 	params: Pick<ChatSessionBridgeSubmitParams, "sendTyping">
 ): PendingSubmit {
@@ -178,8 +135,6 @@ export class ChatSessionBridge {
 
 		await this.submitLock.run(async () => {
 			session = await this.getOrCreateSession();
-			const messagingState = getPhiMessagingSessionState(session);
-			messagingState?.startTurn({ sender: params.sender });
 			this.pendingSubmissions.push(submit);
 			submit.typingNotifier.notify();
 			if (session.isStreaming) {
@@ -207,7 +162,7 @@ export class ChatSessionBridge {
 			await sendPromise;
 			this.removePendingSubmit(submit);
 		} catch (error: unknown) {
-			this.handleSubmitFailure(session, submit);
+			this.handleSubmitFailure(submit);
 			throw error;
 		}
 	}
@@ -249,7 +204,7 @@ export class ChatSessionBridge {
 	}
 
 	private async handleSessionEvent(
-		session: AgentSession,
+		_session: AgentSession,
 		event: AgentSessionEvent
 	): Promise<void> {
 		if (shouldShowTypingForEvent(event)) {
@@ -259,13 +214,11 @@ export class ChatSessionBridge {
 		if (event.type !== "agent_end") {
 			return;
 		}
-		const messagingState = getPhiMessagingSessionState(session);
-		if (!messagingState?.hasPendingOutput()) {
+		if (this.dependencies.isMessagingManaged()) {
 			return;
 		}
 		await this.dependencies.onResolved(
-			resolvePhiSessionTurnOutput(
-				session,
+			resolvePlainAssistantMessage(
 				extractLastAssistantText(event.messages)
 			)
 		);
@@ -279,16 +232,12 @@ export class ChatSessionBridge {
 		}
 	}
 
-	private handleSubmitFailure(
-		session: AgentSession,
-		submit: PendingSubmit
-	): void {
+	private handleSubmitFailure(submit: PendingSubmit): void {
 		const index = this.pendingSubmissions.lastIndexOf(submit);
 		if (index !== -1) {
 			this.pendingSubmissions.splice(index, 1);
 		}
 		submit.typingNotifier.stop();
-		getPhiMessagingSessionState(session)?.discardLastTurn();
 	}
 
 	private resetPendingSubmissions(): void {

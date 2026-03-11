@@ -18,6 +18,14 @@ import {
 } from "@phi/core/chat-workspace";
 import { getPhiLogger } from "@phi/core/logger";
 import {
+	isPhiOwnedExtensionEnabled,
+	PHI_MESSAGING_EXTENSION_ID,
+} from "@phi/core/phi-extensions";
+import {
+	loadPhiWorkspaceConfig,
+	resolveWorkspaceDisabledExtensionIds,
+} from "@phi/core/workspace-config";
+import {
 	chunkTextForOutbound,
 	sanitizeInboundText,
 	sanitizeOutboundText,
@@ -64,7 +72,6 @@ export interface TelegramTextMessageContext {
 		id: number | string;
 		text?: string;
 		attachments: TelegramInboundAttachment[];
-		sender?: PhiMessageMention;
 		systemReminderMetadata?: Record<string, unknown>;
 	};
 	sendTyping(): Promise<unknown>;
@@ -142,6 +149,22 @@ function normalizeTelegramMessageId(value: number | string): string {
 
 function normalizeTelegramUpdateId(value: number): string {
 	return String(value);
+}
+
+function isMessagingEnabledForRoute(target: TelegramRouteTarget): boolean {
+	const workspaceDir = resolveChatWorkspaceDirectory(target.workspace);
+	const workspaceLayout = ensureChatWorkspaceLayout(workspaceDir);
+	const workspaceConfig = loadPhiWorkspaceConfig(
+		workspaceLayout.configFilePath
+	);
+	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
+		workspaceConfig,
+		workspaceLayout.configFilePath
+	);
+	return isPhiOwnedExtensionEnabled(
+		disabledExtensionIds,
+		PHI_MESSAGING_EXTENSION_ID
+	);
 }
 
 function buildTelegramInboxDatePrefix(now: Date): string {
@@ -266,24 +289,6 @@ function buildTelegramReplyParams(
 		reply_parameters: {
 			message_id: Number(replyToMessageId),
 		},
-	};
-}
-
-function buildTelegramSenderMention(
-	from: Context["from"]
-): PhiMessageMention | undefined {
-	if (!from) {
-		return undefined;
-	}
-	return {
-		userId: String(from.id),
-		username: from.username,
-		displayName: [from.first_name, from.last_name]
-			.filter(
-				(part): part is string =>
-					typeof part === "string" && part.length > 0
-			)
-			.join(" "),
 	};
 }
 
@@ -798,7 +803,6 @@ class GrammyPollingBot implements TelegramPollingBot {
 					id: message.message_id,
 					text,
 					attachments,
-					sender: buildTelegramSenderMention(message.from),
 					systemReminderMetadata,
 				},
 				sendTyping: async () => {
@@ -1039,7 +1043,6 @@ async function submitTelegramTextMessage(
 	try {
 		await bridge.submit({
 			content: inboundContent,
-			sender: context.message.sender,
 			sendTyping: context.sendTyping,
 		});
 		log.info("telegram.message.completed", {
@@ -1152,6 +1155,9 @@ export async function startTelegramPollingBot(
 				};
 				bridgeStates.set(target.chatId, routeState);
 				bridge = new ChatSessionBridge(runtime, target.chatId, {
+					isMessagingManaged: () =>
+						deliveryRegistry !== undefined &&
+						isMessagingEnabledForRoute(target),
 					onResolved: async (outboundMessages) =>
 						await handleResolvedTelegramRun(
 							bot,

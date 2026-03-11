@@ -34,7 +34,6 @@ describe("buildPhiSystemPrompt", () => {
 				],
 				memoryFilePath: filePath,
 				toolNames: ["read", "edit", "write", "bash"],
-				eventText: "- periodic\n- reply with [SILENT] when no-op",
 			});
 
 			expect(
@@ -69,7 +68,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read"],
-				eventText: "",
 			});
 
 			expect(prompt.includes("## Skills")).toBe(false);
@@ -97,7 +95,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read"],
-				eventText: "",
 			});
 
 			expect(prompt.includes("Current MEMORY.md")).toBe(true);
@@ -117,7 +114,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read"],
-				eventText: "",
 			});
 
 			expect(prompt.includes(filePath)).toBe(true);
@@ -137,7 +133,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read", "reload"],
-				eventText: "",
 			});
 
 			expect(
@@ -168,7 +163,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read"],
-				eventText: "",
 				includeWorkspaceConfigGuidance: false,
 			});
 
@@ -192,8 +186,6 @@ describe("buildPhiSystemPrompt", () => {
 				skills: [],
 				memoryFilePath: filePath,
 				toolNames: ["read", "send"],
-				eventText:
-					"- End with exact `NO_REPLY` when send already delivered everything the user should see.",
 			});
 
 			expect(

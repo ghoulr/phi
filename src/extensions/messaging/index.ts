@@ -8,10 +8,17 @@ import type {
 	ExtensionContext,
 	ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
+
 import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
-import { NO_REPLY_TOKEN } from "@phi/messaging/control-tokens";
-import type { PhiMessagingSessionState } from "@phi/messaging/session-state";
-import type { PhiMessage, PhiMessageAttachment } from "@phi/messaging/types";
+import { resolvePhiMessagingOutput } from "@phi/extensions/messaging/resolve-output";
+import { resolveSenderMentionFromCurrentTurn } from "@phi/extensions/messaging/sender";
+import { NO_REPLY_TOKEN } from "@phi/extensions/messaging/tokens";
+import { extractLastAssistantText } from "@phi/messaging/assistant-output";
+import type {
+	PhiMessage,
+	PhiMessageAttachment,
+	PhiMessageMention,
+} from "@phi/messaging/types";
 
 const SendAttachmentSchema = Type.Object({
 	path: Type.String({ description: "Path to a file inside the workspace." }),
@@ -43,16 +50,16 @@ const SendSchema = Type.Object({
 
 type SendInput = Static<typeof SendSchema>;
 
-export interface CreatePhiMessagingExtensionDependencies {
-	state: PhiMessagingSessionState;
-	deliverMessage(message: PhiMessage): Promise<void>;
+interface MessagingRunState {
+	deferredMessage?: PhiMessage;
+	sender?: PhiMessageMention;
 }
 
-function buildPhiMessageGuidance(): string {
-	return [
-		"- End with exact `NO_REPLY` when `send()` already delivered everything the user should see.",
-		"- `NO_REPLY` suppresses the final assistant text.",
-	].join("\n");
+export interface CreatePhiMessagingExtensionDependencies {
+	deliverMessage(
+		message: PhiMessage,
+		phase: "instant" | "final"
+	): Promise<void>;
 }
 
 function resolveAttachmentPath(
@@ -66,21 +73,29 @@ function resolveAttachmentPath(
 			`Attachment path must stay inside the workspace: ${attachment.path}`
 		);
 	}
-
 	if (!existsSync(filePath)) {
 		throw new Error(`Attachment file not found: ${attachment.path}`);
 	}
-
 	return {
 		path: filePath,
 		name: attachment.name?.trim() || basename(filePath),
 	};
 }
 
+function requireCurrentSenderMention(
+	currentRun: MessagingRunState | undefined
+): PhiMessageMention {
+	const sender = currentRun?.sender;
+	if (!sender) {
+		throw new Error("Current turn has no sender to mention.");
+	}
+	return sender;
+}
+
 function resolvePhiMessage(
 	ctx: ExtensionContext,
 	input: SendInput,
-	state: PhiMessagingSessionState
+	currentRun: MessagingRunState | undefined
 ): PhiMessage {
 	const text = input.text?.trim() || undefined;
 	const attachments = (input.attachments ?? []).map((attachment) =>
@@ -91,19 +106,25 @@ function resolvePhiMessage(
 	}
 	const mentions =
 		input.mentionSender === true
-			? [resolveCurrentSenderMention(state)]
+			? [requireCurrentSenderMention(currentRun)]
 			: undefined;
 	return { text, attachments, mentions };
 }
 
-function resolveCurrentSenderMention(
-	state: PhiMessagingSessionState
-): NonNullable<PhiMessage["mentions"]>[number] {
-	const sender = state.getTurnContext()?.sender;
-	if (!sender) {
-		throw new Error("Current turn has no sender to mention.");
+function ensureRunState(
+	currentRun: MessagingRunState | undefined
+): MessagingRunState {
+	return currentRun ?? {};
+}
+
+function stageDeferredMessage(
+	currentRun: MessagingRunState,
+	message: PhiMessage
+): void {
+	if (currentRun.deferredMessage) {
+		throw new Error("Only one deferred send is allowed per turn.");
 	}
-	return sender;
+	currentRun.deferredMessage = message;
 }
 
 async function executeSendTool(
@@ -112,66 +133,99 @@ async function executeSendTool(
 	_signal: AbortSignal | undefined,
 	_onUpdate: unknown,
 	ctx: ExtensionContext | undefined,
+	currentRun: MessagingRunState | undefined,
 	dependencies: CreatePhiMessagingExtensionDependencies
-): Promise<AgentToolResult<Record<string, unknown>>> {
+): Promise<{
+	result: AgentToolResult<Record<string, unknown>>;
+	nextRun: MessagingRunState;
+}> {
 	if (!ctx) {
 		throw new Error("send requires an extension context");
 	}
 
-	const message = resolvePhiMessage(ctx, input, dependencies.state);
+	const run = ensureRunState(currentRun);
+	const message = resolvePhiMessage(ctx, input, run);
 	if (input.instant === true) {
-		await dependencies.deliverMessage(message);
+		await dependencies.deliverMessage(message, "instant");
 		return {
-			content: [
-				{
-					type: "text",
-					text: "Message sent immediately. End with exact NO_REPLY if this already delivered everything.",
-				},
-			],
-			details: { instant: true },
+			result: {
+				content: [
+					{
+						type: "text",
+						text: "Message sent immediately. End with exact NO_REPLY if this already delivered everything.",
+					},
+				],
+				details: { instant: true },
+			},
+			nextRun: run,
 		};
 	}
 
-	dependencies.state.setDeferredMessage(message);
+	stageDeferredMessage(run, message);
 	return {
-		content: [
-			{
-				type: "text",
-				text: "Deferred message staged for agent run end.",
-			},
-		],
-		details: { instant: false },
+		result: {
+			content: [
+				{
+					type: "text",
+					text: "Deferred message staged for agent run end.",
+				},
+			],
+			details: { instant: false },
+		},
+		nextRun: run,
 	};
-}
-
-export function buildPhiMessagingEventText(): string {
-	return buildPhiMessageGuidance();
 }
 
 export function createPhiMessagingExtension(
 	dependencies: CreatePhiMessagingExtensionDependencies
 ): ExtensionFactory {
 	return labelInlineExtensionFactory("phi/messaging", (pi: ExtensionAPI) => {
+		let currentRun: MessagingRunState | undefined;
+
+		pi.on("agent_start", async (_event, ctx) => {
+			currentRun = {
+				sender: resolveSenderMentionFromCurrentTurn(ctx),
+			};
+		});
+
+		pi.on("agent_end", async (event) => {
+			const run = currentRun;
+			currentRun = undefined;
+			const outboundMessages = resolvePhiMessagingOutput({
+				assistantText: extractLastAssistantText(event.messages),
+				deferredMessage: run?.deferredMessage,
+			});
+			for (const message of outboundMessages) {
+				await dependencies.deliverMessage(message, "final");
+			}
+		});
+
 		pi.registerTool({
 			name: "send",
 			label: "send",
 			description:
 				"Send a user-visible message immediately or stage it for agent run end.",
 			promptGuidelines: [
-				"Use send for attachments or explicit user-visible delivery.",
-				"Use mentionSender to mention the current sender when needed.",
+				"Use send for attachments, mentions, or explicit user-visible delivery.",
+				"Use send(instant: true) to send a separate message immediately.",
+				"Without instant: true, send stages one deferred message for agent run end.",
 				`If send(instant: true) already delivered everything the user should see, end with exact ${NO_REPLY_TOKEN}.`,
+				`If the deferred send should be the only visible output, end with exact ${NO_REPLY_TOKEN}.`,
 			],
 			parameters: SendSchema,
-			execute: async (toolCallId, params, signal, onUpdate, ctx) =>
-				await executeSendTool(
+			execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+				const execution = await executeSendTool(
 					toolCallId,
 					params,
 					signal,
 					onUpdate,
 					ctx,
+					currentRun,
 					dependencies
-				),
+				);
+				currentRun = execution.nextRun;
+				return execution.result;
+			},
 		});
 	});
 }

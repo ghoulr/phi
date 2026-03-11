@@ -14,10 +14,3 @@ export interface PhiMessage {
 	attachments: PhiMessageAttachment[];
 	mentions?: PhiMessageMention[];
 }
-
-export interface PhiSendInput {
-	text?: string;
-	attachments?: PhiMessageAttachment[];
-	instant?: boolean;
-	mentionSender?: boolean;
-}

@@ -7,6 +7,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	loadPhiWorkspaceConfig,
 	resolveWorkspaceCronJobDefinitions,
+	resolveWorkspaceDisabledExtensionIds,
 	resolveWorkspaceSkillEnvOverrides,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
@@ -58,6 +59,9 @@ describe("workspace config", () => {
 					EXAMPLE_API_KEY: "test-key",
 				},
 			});
+			expect(
+				resolveWorkspaceDisabledExtensionIds(config, configFilePath)
+			).toEqual([]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -78,6 +82,57 @@ describe("workspace config", () => {
 			expect(() =>
 				resolveWorkspaceCronJobDefinitions(config, configFilePath)
 			).toThrow("Invalid workspace config: cron.jobs must be a list");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves disabled extension ids", () => {
+		const root = mkdtempSync(join(tmpdir(), "phi-workspace-config-"));
+		const configFilePath = join(root, "config.yaml");
+
+		try {
+			writeFileSync(
+				configFilePath,
+				[
+					"version: 1",
+					"extensions:",
+					"  disabled:",
+					"    - messaging",
+					"    - memory-maintenance",
+					"    - messaging",
+				].join("\n"),
+				"utf-8"
+			);
+
+			const config = loadPhiWorkspaceConfig(configFilePath);
+			expect(
+				resolveWorkspaceDisabledExtensionIds(config, configFilePath)
+			).toEqual(["messaging", "memory-maintenance"]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("fails when extensions.disabled contains an empty string", () => {
+		const root = mkdtempSync(join(tmpdir(), "phi-workspace-config-"));
+		const configFilePath = join(root, "config.yaml");
+
+		try {
+			writeFileSync(
+				configFilePath,
+				["version: 1", "extensions:", "  disabled:", '    - "  "'].join(
+					"\n"
+				),
+				"utf-8"
+			);
+
+			const config = loadPhiWorkspaceConfig(configFilePath);
+			expect(() =>
+				resolveWorkspaceDisabledExtensionIds(config, configFilePath)
+			).toThrow(
+				"Invalid workspace config: extensions.disabled must not contain empty strings"
+			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

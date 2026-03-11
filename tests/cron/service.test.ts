@@ -5,18 +5,30 @@ import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "bun:test";
 
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type {
+	AgentSession,
+	ExtensionFactory,
+} from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 
 import { InMemoryChatExecutor } from "@phi/core/chat-executor";
 import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
+import type { PhiConfig } from "@phi/core/config";
 import {
 	resetPhiLoggerForTest,
 	setPhiLoggerSettingsForTest,
 } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
-import type { ChatSessionRuntime } from "@phi/core/runtime";
-import { startCronService } from "@phi/cron/service";
+import type {
+	ChatSessionRuntime,
+	CreatePhiAgentSessionOptions,
+} from "@phi/core/runtime";
+import {
+	createDefaultCronServiceDependencies,
+	startCronService,
+} from "@phi/cron/service";
+import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
+import type { PhiMessage } from "@phi/messaging/types";
 
 const createdRoots: string[] = [];
 let logOutput = "";
@@ -94,6 +106,123 @@ function createAssistantMessage(text: string): AssistantMessage {
 		},
 		stopReason: "stop",
 		timestamp: Date.now(),
+	};
+}
+
+interface MessagingExtensionHarness {
+	handlers: Map<string, (event: unknown) => Promise<void>>;
+	sendTool?: {
+		execute: (
+			toolCallId: string,
+			params: Record<string, unknown>,
+			signal?: AbortSignal,
+			onUpdate?: unknown,
+			ctx?: unknown
+		) => Promise<unknown>;
+	};
+	ctx: {
+		cwd: string;
+		sessionManager: {
+			getBranch(): Array<{
+				type: "message";
+				message: {
+					role: "user";
+					content: Array<{ type: "text"; text: string }>;
+				};
+			}>;
+		};
+	};
+}
+
+function createMessagingExtensionHarness(
+	factory: ExtensionFactory,
+	workspace: string
+): MessagingExtensionHarness {
+	const handlers = new Map<string, (event: unknown) => Promise<void>>();
+	const harness: MessagingExtensionHarness = {
+		handlers,
+		ctx: {
+			cwd: workspace,
+			sessionManager: {
+				getBranch() {
+					return [
+						{
+							type: "message",
+							message: {
+								role: "user",
+								content: [
+									{ type: "text", text: "cron prompt" },
+								],
+							},
+						},
+					];
+				},
+			},
+		},
+	};
+	factory({
+		on(
+			name: string,
+			handler: (event: unknown, ctx: unknown) => Promise<void>
+		) {
+			handlers.set(name, async (event: unknown) => {
+				await handler(event, harness.ctx as never);
+			});
+		},
+		registerTool(
+			definition: NonNullable<MessagingExtensionHarness["sendTool"]>
+		) {
+			harness.sendTool = definition;
+		},
+	} as never);
+	return harness;
+}
+
+function createFakeCronAgentSessionFactory(params: {
+	workspace: string;
+	runTurn(harness: MessagingExtensionHarness | undefined): Promise<string>;
+}) {
+	return async (
+		_chatId: string,
+		_phiConfig: PhiConfig,
+		options: CreatePhiAgentSessionOptions = {}
+	): Promise<AgentSession> => {
+		const harness = options.extensionFactories?.[0]
+			? createMessagingExtensionHarness(
+					options.extensionFactories[0],
+					params.workspace
+				)
+			: undefined;
+		let assistantText = "";
+		const state = {
+			messages: [] as AssistantMessage[],
+		};
+		const session = {
+			get messages() {
+				return state.messages;
+			},
+			async sendUserMessage(): Promise<void> {
+				await harness?.handlers.get("agent_start")?.({
+					type: "agent_start",
+				});
+				assistantText = await params.runTurn(harness);
+				state.messages = [createAssistantMessage(assistantText)];
+				await harness?.handlers.get("agent_end")?.({
+					type: "agent_end",
+					messages: [
+						{
+							role: "assistant",
+							content: [{ type: "text", text: assistantText }],
+						},
+					],
+				});
+			},
+			getLastAssistantText(): string {
+				return assistantText;
+			},
+			dispose(): void {},
+		};
+		return session as unknown as AgentSession;
 	};
 }
 
@@ -263,5 +392,118 @@ describe("startCronService", () => {
 		await service.stop();
 
 		expect(runCalls).toBe(1);
+	});
+
+	it("delivers cron instant sends before the job completes", async () => {
+		const workspace = createWorkspace();
+		ensureChatWorkspaceLayout(workspace);
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
+		const deliveredMessages: PhiMessage[] = [];
+		let resolveDelivered: (() => void) | undefined;
+		const delivered = new Promise<void>((resolve) => {
+			resolveDelivered = resolve;
+		});
+		let finishTurn: (() => void) | undefined;
+		const finishTurnPromise = new Promise<void>((resolve) => {
+			finishTurn = resolve;
+		});
+		deliveryRegistry.register("alice", {
+			async deliver(message) {
+				deliveredMessages.push(message);
+				resolveDelivered?.();
+			},
+		});
+		const dependencies = createDefaultCronServiceDependencies({
+			deliveryRegistry,
+			createAgentSession: createFakeCronAgentSessionFactory({
+				workspace,
+				async runTurn(harness) {
+					if (!harness?.sendTool) {
+						throw new Error("Missing send tool");
+					}
+					await harness.sendTool.execute(
+						"call-1",
+						{ text: "progress", instant: true },
+						undefined,
+						undefined,
+						harness.ctx
+					);
+					await finishTurnPromise;
+					return "NO_REPLY";
+				},
+			}),
+		});
+		const phiConfig: PhiConfig = {
+			chats: {
+				alice: {
+					workspace,
+					agent: "main",
+				},
+			},
+		};
+		let resolved = false;
+		const resultPromise = dependencies
+			.runJob("alice", phiConfig, "cron prompt")
+			.then((result) => {
+				resolved = true;
+				return result;
+			});
+
+		await delivered;
+		expect(deliveredMessages).toEqual([
+			{ text: "progress", attachments: [] },
+		]);
+		expect(resolved).toBe(false);
+		finishTurn?.();
+		await resultPromise;
+	});
+
+	it("does not persist assistant history for cron instant send plus NO_REPLY", async () => {
+		const workspace = createWorkspace();
+		ensureChatWorkspaceLayout(workspace);
+		const deliveryRegistry = new PhiRouteDeliveryRegistry();
+		const deliveredMessages: PhiMessage[] = [];
+		deliveryRegistry.register("alice", {
+			async deliver(message) {
+				deliveredMessages.push(message);
+			},
+		});
+		const dependencies = createDefaultCronServiceDependencies({
+			deliveryRegistry,
+			createAgentSession: createFakeCronAgentSessionFactory({
+				workspace,
+				async runTurn(harness) {
+					if (!harness?.sendTool) {
+						throw new Error("Missing send tool");
+					}
+					await harness.sendTool.execute(
+						"call-1",
+						{ text: "done", instant: true },
+						undefined,
+						undefined,
+						harness.ctx
+					);
+					return "NO_REPLY";
+				},
+			}),
+		});
+		const phiConfig: PhiConfig = {
+			chats: {
+				alice: {
+					workspace,
+					agent: "main",
+				},
+			},
+		};
+
+		const result = await dependencies.runJob(
+			"alice",
+			phiConfig,
+			"cron prompt"
+		);
+
+		expect(deliveredMessages).toEqual([{ text: "done", attachments: [] }]);
+		expect(result.outboundMessages).toEqual([]);
+		expect(result.assistantMessage).toBeUndefined();
 	});
 });

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
 
-import { resolvePhiTurnOutput } from "@phi/messaging/resolve-turn-output";
+import { resolvePhiMessagingOutput } from "@phi/extensions/messaging/resolve-output";
 
-describe("resolvePhiTurnOutput", () => {
+describe("resolvePhiMessagingOutput", () => {
 	it("suppresses delivery for exact NO_REPLY without deferred content", () => {
 		expect(
-			resolvePhiTurnOutput({
+			resolvePhiMessagingOutput({
 				assistantText: "NO_REPLY",
 			})
 		).toEqual([]);
@@ -13,7 +13,7 @@ describe("resolvePhiTurnOutput", () => {
 
 	it("combines final reply with deferred text and attachments", () => {
 		expect(
-			resolvePhiTurnOutput({
+			resolvePhiMessagingOutput({
 				assistantText: "done",
 				deferredMessage: {
 					text: "see attachment",
@@ -32,7 +32,7 @@ describe("resolvePhiTurnOutput", () => {
 
 	it("delivers deferred content alone when final reply is NO_REPLY", () => {
 		expect(
-			resolvePhiTurnOutput({
+			resolvePhiMessagingOutput({
 				assistantText: "NO_REPLY",
 				deferredMessage: {
 					text: "report attached",
@@ -49,9 +49,9 @@ describe("resolvePhiTurnOutput", () => {
 		]);
 	});
 
-	it("delivers assistant text without transport reply metadata", () => {
+	it("delivers assistant text without deferred metadata", () => {
 		expect(
-			resolvePhiTurnOutput({
+			resolvePhiMessagingOutput({
 				assistantText: "done",
 			})
 		).toEqual([

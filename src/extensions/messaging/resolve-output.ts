@@ -1,7 +1,8 @@
-import { isNoReplyToken } from "@phi/messaging/control-tokens";
 import type { PhiMessage } from "@phi/messaging/types";
 
-export interface ResolvePhiTurnOutputParams {
+import { isNoReplyToken } from "@phi/extensions/messaging/tokens";
+
+export interface ResolvePhiMessagingOutputParams {
 	assistantText: string | undefined;
 	deferredMessage?: PhiMessage;
 }
@@ -35,8 +36,8 @@ function createResolvedMessage(params: {
 	};
 }
 
-export function resolvePhiTurnOutput(
-	params: ResolvePhiTurnOutputParams
+export function resolvePhiMessagingOutput(
+	params: ResolvePhiMessagingOutputParams
 ): PhiMessage[] {
 	const assistantText = normalizeText(params.assistantText);
 	const deferredText = normalizeText(params.deferredMessage?.text);

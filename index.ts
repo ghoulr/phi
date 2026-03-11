@@ -1,21 +1,69 @@
 import { runServiceCommand } from "@phi/commands/service";
 import { runTuiCommand } from "@phi/commands/tui";
-import { createPhiAgentSession, createPhiRuntime } from "@phi/core/runtime";
-import { getDefaultPhiConfigFilePath, loadPhiConfig } from "@phi/core/config";
+import {
+	ensureChatWorkspaceLayout,
+	resolveChatWorkspaceDirectory,
+} from "@phi/core/chat-workspace";
+import {
+	getDefaultPhiConfigFilePath,
+	loadPhiConfig,
+	resolveChatRuntimeConfig,
+} from "@phi/core/config";
+import {
+	createEnabledPhiOwnedExtensionFactories,
+	PHI_MESSAGING_EXTENSION_ID,
+} from "@phi/core/phi-extensions";
 import { disablePiVersionCheck } from "@phi/core/pi";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import { createReloadTool } from "@phi/core/reload-tool";
+import { createPhiAgentSession, createPhiRuntime } from "@phi/core/runtime";
 import {
-	buildPhiMessagingEventText,
-	createPhiMessagingExtension,
-} from "@phi/extensions/messaging";
+	loadPhiWorkspaceConfig,
+	resolveWorkspaceDisabledExtensionIds,
+} from "@phi/core/workspace-config";
+import { createPhiMessagingExtension } from "@phi/extensions/messaging";
 import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
-import { PhiMessagingSessionState } from "@phi/messaging/session-state";
 import { startCronService } from "@phi/cron/service";
 import { startTelegramPollingBot } from "@phi/services/telegram";
 import { tui } from "@phi/tui";
 
 disablePiVersionCheck();
+
+function createMessagingExtensionFactories(params: {
+	chatId: string;
+	phiConfig: ReturnType<typeof loadPhiConfig>;
+	deliveryRegistry: PhiRouteDeliveryRegistry;
+}) {
+	const chatConfig = resolveChatRuntimeConfig(
+		params.phiConfig,
+		params.chatId
+	);
+	const workspaceDir = resolveChatWorkspaceDirectory(chatConfig.workspace);
+	const workspaceLayout = ensureChatWorkspaceLayout(workspaceDir);
+	const workspaceConfig = loadPhiWorkspaceConfig(
+		workspaceLayout.configFilePath
+	);
+	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
+		workspaceConfig,
+		workspaceLayout.configFilePath
+	);
+	return createEnabledPhiOwnedExtensionFactories({
+		disabledExtensionIds,
+		definitions: [
+			{
+				id: PHI_MESSAGING_EXTENSION_ID,
+				create: () =>
+					createPhiMessagingExtension({
+						deliverMessage: async (message) => {
+							await params.deliveryRegistry
+								.require(params.chatId)
+								.deliver(message);
+						},
+					}),
+			},
+		],
+	});
+}
 
 const app = tui({
 	runTui: async () => {
@@ -46,23 +94,14 @@ const app = tui({
 					});
 				}
 
-				const messagingState = new PhiMessagingSessionState();
 				return await createPhiAgentSession(chatId, phiConfig, {
 					customTools,
-					messagingState,
 					printSystemPrompt: options.printSystemPrompt === true,
-					extensionFactories: [
-						createPhiMessagingExtension({
-							state: messagingState,
-							deliverMessage: async (message) => {
-								await deliveryRegistry
-									.require(chatId)
-									.deliver(message);
-							},
-						}),
-					],
-					additionalPromptToolNames: ["send"],
-					eventText: buildPhiMessagingEventText(),
+					extensionFactories: createMessagingExtensionFactories({
+						chatId,
+						phiConfig,
+						deliveryRegistry,
+					}),
 				});
 			}
 		);

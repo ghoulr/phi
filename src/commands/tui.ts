@@ -14,6 +14,10 @@ import {
 
 import { applyInlineExtensionLabels } from "@phi/core/inline-extension-labels";
 import {
+	createEnabledPhiOwnedExtensionFactories,
+	PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
+} from "@phi/core/phi-extensions";
+import {
 	getPhiPiMemoryFilePath,
 	getPhiSharedAuthFilePath,
 } from "@phi/core/paths";
@@ -23,12 +27,14 @@ import {
 	resolvePhiGlobalSkillPaths,
 } from "@phi/core/skills";
 import { installPhiSystemPrompt } from "@phi/core/system-prompt";
+import {
+	loadPhiWorkspaceConfig,
+	resolveWorkspaceDisabledExtensionIds,
+} from "@phi/core/workspace-config";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 
 export type TuiModeRunner = (session: AgentSession) => Promise<void>;
 export type TuiSessionFactory = () => Promise<AgentSession>;
-
-const DEFAULT_PROMPT_TOOL_NAMES = ["read", "bash", "edit", "write"];
 
 function getTuiSessionsDir(agentDir: string): string {
 	return join(agentDir, "sessions");
@@ -57,11 +63,24 @@ export async function createDefaultTuiSession(
 		join(agentDir, "models.json")
 	);
 	const skillPaths = resolvePhiGlobalSkillPaths(userHomeDir);
-	const extensionFactories = [
-		createPhiMemoryMaintenanceExtension({
-			memoryFilePath,
-		}),
-	];
+	const workspaceConfigFilePath = join(cwd, ".phi", "config.yaml");
+	const workspaceConfig = loadPhiWorkspaceConfig(workspaceConfigFilePath);
+	const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
+		workspaceConfig,
+		workspaceConfigFilePath
+	);
+	const extensionFactories = createEnabledPhiOwnedExtensionFactories({
+		disabledExtensionIds,
+		definitions: [
+			{
+				id: PHI_MEMORY_MAINTENANCE_EXTENSION_ID,
+				create: () =>
+					createPhiMemoryMaintenanceExtension({
+						memoryFilePath,
+					}),
+			},
+		],
+	});
 	const resourceLoader = new DefaultResourceLoader({
 		cwd,
 		agentDir,
@@ -96,7 +115,7 @@ export async function createDefaultTuiSession(
 		workspacePath: cwd,
 		skills: resourceLoader.getSkills().skills,
 		memoryFilePath,
-		toolNames: DEFAULT_PROMPT_TOOL_NAMES,
+		toolNames: session.getAllTools().map((tool) => tool.name),
 		includeWorkspaceConfigGuidance: false,
 	});
 	return session;

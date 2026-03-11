@@ -10,14 +10,16 @@ import {
 	ensureChatWorkspaceLayout,
 	resolveChatWorkspaceDirectory,
 } from "@phi/core/chat-workspace";
-import type {
-	PhiConfig,
-	ResolvedCronChatServiceConfig,
+import {
+	resolveChatRuntimeConfig,
+	type PhiConfig,
+	type ResolvedCronChatServiceConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import {
 	loadPhiWorkspaceConfig,
+	resolveWorkspaceDisabledExtensionIds,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
 import {
@@ -32,14 +34,13 @@ import type {
 	LoadedCronJob,
 } from "@phi/cron/types";
 import {
-	buildPhiMessagingEventText,
-	createPhiMessagingExtension,
-} from "@phi/extensions/messaging";
+	createEnabledPhiOwnedExtensionFactories,
+	PHI_MESSAGING_EXTENSION_ID,
+} from "@phi/core/phi-extensions";
+import { createPhiMessagingExtension } from "@phi/extensions/messaging";
+import { resolvePlainAssistantMessage } from "@phi/messaging/assistant-output";
+import type { PhiMessage } from "@phi/messaging/types";
 import type { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
-import {
-	PhiMessagingSessionState,
-	resolvePhiSessionTurnOutput,
-} from "@phi/messaging/session-state";
 
 const EMPTY_USAGE = {
 	input: 0,
@@ -75,6 +76,11 @@ export interface CronServiceDependencies {
 		chatId: string,
 		result: CronRunResult
 	): Promise<void>;
+}
+
+export interface CreateDefaultCronServiceDependenciesParams {
+	deliveryRegistry?: PhiRouteDeliveryRegistry;
+	createAgentSession?: typeof createPhiAgentSession;
 }
 
 function getLastAssistantMessage(
@@ -118,47 +124,79 @@ function buildCronLogText(result: CronRunResult): string {
 		.trim();
 }
 
+function resolvePublishedAssistantText(
+	outboundMessages: PhiMessage[]
+): string | undefined {
+	return outboundMessages
+		.map((message) => message.text?.trim())
+		.filter((text): text is string => Boolean(text))
+		.at(-1);
+}
+
 function createMessagingExtensionFactories(params: {
 	chatId: string;
 	deliveryRegistry: PhiRouteDeliveryRegistry;
-	state: PhiMessagingSessionState;
+	deliveryMessages: PhiMessage[];
+	disabledExtensionIds: readonly string[];
 }): ExtensionFactory[] {
-	return [
-		createPhiMessagingExtension({
-			state: params.state,
-			deliverMessage: async (message) => {
-				await params.deliveryRegistry
-					.require(params.chatId)
-					.deliver(message);
+	return createEnabledPhiOwnedExtensionFactories({
+		disabledExtensionIds: params.disabledExtensionIds,
+		definitions: [
+			{
+				id: PHI_MESSAGING_EXTENSION_ID,
+				create: () =>
+					createPhiMessagingExtension({
+						deliverMessage: async (message, phase) => {
+							if (phase === "instant") {
+								await params.deliveryRegistry
+									.require(params.chatId)
+									.deliver(message);
+								return;
+							}
+							params.deliveryMessages.push(message);
+						},
+					}),
 			},
-		}),
-	];
+		],
+	});
 }
 
-function createDefaultCronServiceDependencies(
-	deliveryRegistry?: PhiRouteDeliveryRegistry
+export function createDefaultCronServiceDependencies(
+	params: CreateDefaultCronServiceDependenciesParams = {}
 ): CronServiceDependencies {
+	const createAgentSession =
+		params.createAgentSession ?? createPhiAgentSession;
+	const deliveryRegistry = params.deliveryRegistry;
 	return {
 		async runJob(
 			chatId: string,
 			phiConfig: PhiConfig,
 			prompt: string
 		): Promise<CronRunResult> {
-			const messagingState = new PhiMessagingSessionState();
-			const session = await createPhiAgentSession(chatId, phiConfig, {
+			const chatConfig = resolveChatRuntimeConfig(phiConfig, chatId);
+			const workspaceDir = resolveChatWorkspaceDirectory(
+				chatConfig.workspace
+			);
+			const workspaceLayout = ensureChatWorkspaceLayout(workspaceDir);
+			const workspaceConfig = loadPhiWorkspaceConfig(
+				workspaceLayout.configFilePath
+			);
+			const disabledExtensionIds = resolveWorkspaceDisabledExtensionIds(
+				workspaceConfig,
+				workspaceLayout.configFilePath
+			);
+			const outboundMessages: PhiMessage[] = [];
+			const messagingExtensionFactories = deliveryRegistry
+				? createMessagingExtensionFactories({
+						chatId,
+						deliveryRegistry,
+						deliveryMessages: outboundMessages,
+						disabledExtensionIds,
+					})
+				: [];
+			const session = await createAgentSession(chatId, phiConfig, {
 				sessionManager: SessionManager.inMemory(),
-				messagingState,
-				extensionFactories: deliveryRegistry
-					? createMessagingExtensionFactories({
-							chatId,
-							deliveryRegistry,
-							state: messagingState,
-						})
-					: [],
-				additionalPromptToolNames: deliveryRegistry ? ["send"] : [],
-				eventText: deliveryRegistry
-					? buildPhiMessagingEventText()
-					: undefined,
+				extensionFactories: messagingExtensionFactories,
 			});
 			try {
 				await session.sendUserMessage(prompt);
@@ -169,20 +207,18 @@ function createDefaultCronServiceDependencies(
 					);
 				}
 
-				const outboundMessages = resolvePhiSessionTurnOutput(
-					session,
-					assistantText
-				);
-				const visibleText = outboundMessages
-					.map((message) => message.text)
-					.find(
-						(text): text is string =>
-							typeof text === "string" && text.length > 0
+				if (
+					outboundMessages.length === 0 &&
+					messagingExtensionFactories.length === 0
+				) {
+					outboundMessages.push(
+						...resolvePlainAssistantMessage(assistantText)
 					);
+				}
 				return {
 					assistantMessage: createPublishedAssistantMessage(
 						getLastAssistantMessage(session),
-						visibleText
+						resolvePublishedAssistantText(outboundMessages)
 					),
 					outboundMessages,
 				};
@@ -508,7 +544,9 @@ export async function startCronService(params: {
 }): Promise<RunningCronService> {
 	const dependencies =
 		params.dependencies ??
-		createDefaultCronServiceDependencies(params.deliveryRegistry);
+		createDefaultCronServiceDependencies({
+			deliveryRegistry: params.deliveryRegistry,
+		});
 	const schedulers = new Map<string, ChatCronScheduler>();
 	log.info("cron.service.starting", {
 		chatCount: params.chatConfigs.length,

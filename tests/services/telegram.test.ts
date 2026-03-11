@@ -17,10 +17,7 @@ import {
 	setPhiLoggerSettingsForTest,
 } from "@phi/core/logger";
 import type { ChatSessionRuntime } from "@phi/core/runtime";
-import {
-	registerPhiMessagingSessionState,
-	PhiMessagingSessionState,
-} from "@phi/messaging/session-state";
+import { PhiRouteDeliveryRegistry } from "@phi/messaging/route-delivery";
 import {
 	buildTelegramSystemReminderMetadata,
 	startTelegramPollingBot,
@@ -243,7 +240,6 @@ function createFakeRuntime(responseText: string): {
 		},
 		dispose(): void {},
 	} as unknown as AgentSession;
-	registerPhiMessagingSessionState(session, new PhiMessagingSessionState());
 
 	const runtime: ChatSessionRuntime<AgentSession> = {
 		async getOrCreateSession(chatId: string) {
@@ -734,7 +730,6 @@ describe("telegram service", () => {
 		let secondQueued = false;
 		const calls: Array<{ text: string | undefined; deliverAs?: string }> =
 			[];
-		const messagingState = new PhiMessagingSessionState();
 
 		const session = {
 			get isStreaming() {
@@ -784,7 +779,6 @@ describe("telegram service", () => {
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(session, messagingState);
 
 		const runtime: ChatSessionRuntime<AgentSession> = {
 			async getOrCreateSession() {
@@ -856,10 +850,6 @@ describe("telegram service", () => {
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(
-			session,
-			new PhiMessagingSessionState()
-		);
 
 		const runtime: ChatSessionRuntime<AgentSession> = {
 			async getOrCreateSession() {
@@ -1220,7 +1210,7 @@ describe("telegram service", () => {
 		expect(typingCalls).toBeGreaterThan(0);
 	});
 
-	it("suppresses final delivery for exact NO_REPLY", async () => {
+	it("delivers literal NO_REPLY as plain assistant text without messaging extension", async () => {
 		const fakeBot = new FakeTelegramBot([createContext()]);
 		const { runtime } = createFakeRuntime("NO_REPLY");
 
@@ -1236,22 +1226,22 @@ describe("telegram service", () => {
 		);
 
 		await running.done;
-		expect(fakeBot.sentTexts).toEqual([]);
-		const logsContent = readCapturedLogs();
-		expect(logsContent.includes('"source":"assistant","text":""')).toBe(
-			false
-		);
+		expect(fakeBot.sentTexts).toEqual([
+			{
+				chatId: "42",
+				text: "NO_REPLY",
+				replyToMessageId: undefined,
+			},
+		]);
 	});
 
-	it("delivers deferred attachments with the final reply", async () => {
-		const route = createRouteTarget("user-alice");
-		const attachmentPath = join(route.workspace, "report.txt");
-		writeFileSync(attachmentPath, "report", "utf-8");
-		const messagingState = new PhiMessagingSessionState();
-
+	it("skips fallback final delivery when messaging is extension-managed", async () => {
 		let listener: ((event: AgentSessionEvent) => void) | undefined;
 		const session = {
 			isStreaming: false,
+			getAllTools() {
+				return [{ name: "send" }];
+			},
 			subscribe(handler: (event: AgentSessionEvent) => void) {
 				listener = handler;
 				return () => {
@@ -1259,16 +1249,11 @@ describe("telegram service", () => {
 				};
 			},
 			async sendUserMessage(): Promise<void> {
-				messagingState.setDeferredMessage({
-					attachments: [{ path: attachmentPath, name: "report.txt" }],
-				});
 				listener?.(createAssistantTurnEndEvent("done"));
 				listener?.(createAgentEndEvent("done"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(session, messagingState);
-
 		const runtime: ChatSessionRuntime<AgentSession> = {
 			async getOrCreateSession() {
 				return session;
@@ -1284,60 +1269,88 @@ describe("telegram service", () => {
 			{
 				token: "test-token",
 				chatRoutes: {
-					"42": route,
+					"42": createRouteTarget("user-alice"),
 				},
 			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			new PhiRouteDeliveryRegistry()
 		);
 
 		await running.done;
-		expect(fakeBot.sentDocuments).toEqual([
-			{
-				chatId: "42",
-				filePath: attachmentPath,
-				fileName: "report.txt",
-				caption: "done",
-				replyToMessageId: undefined,
-			},
-		]);
+		expect(fakeBot.sentTexts).toEqual([]);
 	});
 
-	it("delivers deferred attachments when final reply is NO_REPLY", async () => {
+	it("re-evaluates messaging mode after workspace config changes", async () => {
 		const route = createRouteTarget("user-alice");
-		const attachmentPath = join(route.workspace, "report.txt");
-		writeFileSync(attachmentPath, "report", "utf-8");
-		const messagingState = new PhiMessagingSessionState();
-
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const session = {
+		const listenerBySession = new Map<
+			number,
+			(event: AgentSessionEvent) => void
+		>();
+		const sessionOne = {
 			isStreaming: false,
 			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
+				listenerBySession.set(1, handler);
 				return () => {
-					listener = undefined;
+					listenerBySession.delete(1);
 				};
 			},
 			async sendUserMessage(): Promise<void> {
-				messagingState.setDeferredMessage({
-					text: "report attached",
-					attachments: [{ path: attachmentPath, name: "report.txt" }],
-				});
-				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
-				listener?.(createAgentEndEvent("NO_REPLY"));
+				listenerBySession.get(1)?.(
+					createAssistantTurnEndEvent("first")
+				);
+				listenerBySession.get(1)?.(createAgentEndEvent("first"));
 			},
 			dispose(): void {},
 		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(session, messagingState);
-
+		const sessionTwo = {
+			isStreaming: false,
+			subscribe(handler: (event: AgentSessionEvent) => void) {
+				listenerBySession.set(2, handler);
+				return () => {
+					listenerBySession.delete(2);
+				};
+			},
+			async sendUserMessage(): Promise<void> {
+				listenerBySession.get(2)?.(
+					createAssistantTurnEndEvent("second")
+				);
+				listenerBySession.get(2)?.(createAgentEndEvent("second"));
+			},
+			dispose(): void {},
+		} as unknown as AgentSession;
+		let getSessionCalls = 0;
 		const runtime: ChatSessionRuntime<AgentSession> = {
 			async getOrCreateSession() {
-				return session;
+				getSessionCalls += 1;
+				if (getSessionCalls === 1) {
+					return sessionOne;
+				}
+				writeFileSync(
+					join(route.workspace, ".phi", "config.yaml"),
+					[
+						"version: 1",
+						"extensions:",
+						"  disabled:",
+						"    - messaging",
+					].join("\n"),
+					"utf-8"
+				);
+				return sessionTwo;
 			},
 			disposeSession(): boolean {
 				return true;
 			},
 		};
-		const fakeBot = new FakeTelegramBot([createContext()]);
+		const fakeBot = new FakeTelegramBot([
+			createContext({
+				chat: { id: 42 },
+				message: { id: 10, text: "m1", attachments: [] },
+			}),
+			createContext({
+				chat: { id: 42 },
+				message: { id: 11, text: "m2", attachments: [] },
+			}),
+		]);
 
 		const running = await startTelegramPollingBot(
 			runtime,
@@ -1347,159 +1360,15 @@ describe("telegram service", () => {
 					"42": route,
 				},
 			},
-			{ createBot: () => fakeBot }
-		);
-
-		await running.done;
-		expect(fakeBot.sentDocuments).toEqual([
-			{
-				chatId: "42",
-				filePath: attachmentPath,
-				fileName: "report.txt",
-				caption: "report attached",
-				replyToMessageId: undefined,
-			},
-		]);
-	});
-
-	it("renders mentions for the current sender", async () => {
-		const messagingState = new PhiMessagingSessionState();
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				const sender = messagingState.getTurnContext()?.sender;
-				if (!sender) {
-					throw new Error("Missing sender");
-				}
-				messagingState.setDeferredMessage({
-					text: "please review",
-					attachments: [],
-					mentions: [sender],
-				});
-				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
-				listener?.(createAgentEndEvent("NO_REPLY"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(session, messagingState);
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				message: {
-					id: 10,
-					text: "hello",
-					attachments: [],
-					sender: {
-						userId: "100",
-						username: "alice",
-						displayName: "Alice",
-					},
-				},
-			}),
-		]);
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot }
+			{ createBot: () => fakeBot },
+			new PhiRouteDeliveryRegistry()
 		);
 
 		await running.done;
 		expect(fakeBot.sentTexts).toEqual([
 			{
 				chatId: "42",
-				text: "@alice\n\nplease review",
-				replyToMessageId: undefined,
-			},
-		]);
-	});
-
-	it("fails fast when a mention has no telegram username", async () => {
-		const messagingState = new PhiMessagingSessionState();
-		let listener: ((event: AgentSessionEvent) => void) | undefined;
-		const session = {
-			isStreaming: false,
-			subscribe(handler: (event: AgentSessionEvent) => void) {
-				listener = handler;
-				return () => {
-					listener = undefined;
-				};
-			},
-			async sendUserMessage(): Promise<void> {
-				const sender = messagingState.getTurnContext()?.sender;
-				if (!sender) {
-					throw new Error("Missing sender");
-				}
-				messagingState.setDeferredMessage({
-					text: "please review",
-					attachments: [],
-					mentions: [sender],
-				});
-				listener?.(createAssistantTurnEndEvent("NO_REPLY"));
-				listener?.(createAgentEndEvent("NO_REPLY"));
-			},
-			dispose(): void {},
-		} as unknown as AgentSession;
-		registerPhiMessagingSessionState(session, messagingState);
-
-		const runtime: ChatSessionRuntime<AgentSession> = {
-			async getOrCreateSession() {
-				return session;
-			},
-			disposeSession(): boolean {
-				return true;
-			},
-		};
-		const fakeBot = new FakeTelegramBot([
-			createContext({
-				message: {
-					id: 10,
-					text: "hello",
-					attachments: [],
-					sender: {
-						userId: "100",
-						displayName: "Alice",
-					},
-				},
-			}),
-		]);
-
-		const running = await startTelegramPollingBot(
-			runtime,
-			{
-				token: "test-token",
-				chatRoutes: {
-					"42": createRouteTarget("user-alice"),
-				},
-			},
-			{ createBot: () => fakeBot }
-		);
-
-		await running.done;
-		expect(fakeBot.sentTexts).toEqual([
-			{
-				chatId: "42",
-				text: "Telegram mention requires username for user 100",
+				text: "second",
 				replyToMessageId: undefined,
 			},
 		]);

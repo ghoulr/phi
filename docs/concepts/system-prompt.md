@@ -21,7 +21,6 @@ Describes the system prompt used by phi chat sessions.
 | `skills` | `resourceLoader.getSkills().skills` | `resourceLoader.getSkills().skills` |
 | `memoryFilePath` | `<workspace>/.phi/memory/MEMORY.md` | `~/.phi/pi/memory/MEMORY.md` |
 | `toolNames` | built-in file tools plus runtime tools when available | built-in file tools |
-| `eventText` | optional | optional |
 
 Service chat skills come from pi `DefaultResourceLoader` with phi-managed skill roots.
 TUI chat uses pi skill loading from the global phi state.

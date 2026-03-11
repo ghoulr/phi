@@ -15,6 +15,7 @@ Project `phi` is a `openclaw` like agent running behind IMs
 ## Architecture
 
 - extend `pi-coding-agent` for full capabilities
+- extend `pi` with optional self-contained extensions as possible as we can, so we can enable/disable them separately
 
 ## Design and coding
 
