@@ -77,6 +77,10 @@ They do not interpret what a message means.
 ~/.phi/
 ├─ phi.yaml              # operator config
 ├─ pi/
+│  ├─ settings.json      # global pi packages/extensions config
+│  ├─ models.json
+│  ├─ npm/
+│  ├─ git/
 │  ├─ sessions/
 │  ├─ memory/
 │  │  ├─ MEMORY.md
@@ -104,6 +108,8 @@ They do not interpret what a message means.
 ```
 
 `config.yaml` stores workspace config, including chat-local settings and cron metadata.
+
+`phi pi install|remove|update|list` proxies directly into the global pi workspace at `~/.phi/pi`.
 
 ## Memory
 
