@@ -1,30 +1,23 @@
 # phi monorepo
 
-Monorepo for `phi` and future installable pi extensions.
+Monorepo for `phi` and installable `pi` extensions.
 
 ## Layout
 
 ```text
 packages/
-├─ phi/           # main phi application
-└─ pi-*/          # installable pi extension packages
+├─ phi/      # main application
+└─ pi-*/     # installable pi extensions
 ```
 
 ## Commands
 
-- `bun run tui` — run `phi` TUI from `packages/phi` with `bun run --cwd`
-- `bun run dev:service` — run `phi` service in development from `packages/phi`
-- `bun run check` — run workspace checks
-- `bun run test:agent` — run `packages/phi` agent tests
+- `bun run tui`
+- `bun run dev:service`
+- `bun run check`
+- `bun run test:agent`
 
-## Application Docs
+## Docs
 
-- app package: `packages/phi`
-- app README: `packages/phi/README.md`
-- app architecture: `packages/phi/ARCHITECT.md`
-
-## Pi Package
-
-The repository root is a pi package root.
-Future installable extensions live under `packages/pi-*` and are exposed through the root `pi` manifest.
-Built-in `phi` extensions stay inside `packages/phi` and are not installed through `phi pi install`.
+- `packages/phi/README.md`
+- `packages/phi/ARCHITECT.md`

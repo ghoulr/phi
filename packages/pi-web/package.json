@@ -1,0 +1,32 @@
+{
+  "name": "pi-web",
+  "type": "module",
+  "private": true,
+  "keywords": ["pi-package"],
+  "module": "index.ts",
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "scripts": {
+    "check": "biome format --write . && biome lint . && tsgo --noEmit",
+    "test:agent": "AGENT=1 bun test --bail"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "happy-dom": "^18.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@mariozechner/pi-ai": "^0.55.4",
+    "@mariozechner/pi-coding-agent": "0.55.4",
+    "@sinclair/typebox": "^0.34.41",
+    "@types/bun": "latest",
+    "@typescript/native-preview": "^7.0.0-dev.20260226.1"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*",
+    "typescript": "^5"
+  }
+}
