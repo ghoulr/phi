@@ -1,34 +1,26 @@
 {
-  "name": "phi",
-  "module": "index.ts",
-  "type": "module",
+  "name": "phi-monorepo",
   "private": true,
-  "devDependencies": {
-    "@biomejs/biome": "^2.4.4",
-    "@types/bun": "latest",
-    "@typescript/native-preview": "^7.0.0-dev.20260226.1",
-    "husky": "^9.1.7",
-    "lint-staged": "^16.2.7"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+  "packageManager": "bun@1.3.10",
+  "workspaces": [
+    "packages/*"
+  ],
+  "pi": {
+    "extensions": [
+      "./packages/pi-*/extensions"
+    ]
   },
   "scripts": {
     "prepare": "husky",
     "lint-staged": "lint-staged",
-    "check": "biome format --write . && biome lint . && tsgo --noEmit",
-    "test:agent": "AGENT=1 bun test --bail",
-    "tui": "bun index.ts",
-    "dev:service": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service",
-    "dev:service:prompt": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service --print-system-prompt"
+    "check": "bun run --filter '*' check",
+    "test:agent": "bun run --filter phi test:agent",
+    "tui": "bun run --cwd packages/phi tui",
+    "dev:service": "bun run --cwd packages/phi dev:service",
+    "dev:service:prompt": "bun run --cwd packages/phi dev:service:prompt"
   },
-  "dependencies": {
-    "@mariozechner/pi-coding-agent": "0.55.4",
-    "cac": "^6.7.14",
-    "croner": "^9.1.0",
-    "grammy": "^1.40.1",
-    "pino": "^10.3.1",
-    "pino-pretty": "^13.1.3",
-    "yaml": "^2.8.1"
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7"
   }
 }

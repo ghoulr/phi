@@ -1,132 +1,30 @@
-# phi
+# phi monorepo
 
-Phi is a chat runtime built on top of [pi](https://github.com/badlogic/pi-mono) and the [pi ecosystem](https://pi.dev), inspired by [openclaw](https://github.com/openclaw/openclaw).
+Monorepo for `phi` and future installable pi extensions.
 
-## Architecture
-
-See [ARCHITECT.md](./ARCHITECT.md) for the full design.
-
-## Concepts
-
-- [Chat](./docs/concepts/chat.md)
-- [Chat Handler](./docs/concepts/chat-handler.md)
-- [Workspace Config](./docs/concepts/workspace-config.md)
-- [System Prompt](./docs/concepts/system-prompt.md)
-- [Skills](./docs/concepts/skills.md)
-- [Cron](./docs/concepts/cron.md)
-- [Routes](./docs/concepts/routes.md)
-- [Memory](./docs/concepts/memory.md)
-- [Transient Turn](./docs/concepts/transient-turn.md)
-- [Log](./docs/concepts/log.md)
+## Layout
 
 ```text
-Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
-                     config-driven wiring
+packages/
+├─ phi/           # main phi application
+└─ pi-*/          # installable pi extension packages
 ```
 
-## Quick Start
+## Commands
 
-1. Configure a supported model credential.
-2. Copy [phi.example.yaml](./phi.example.yaml) to `~/.phi/phi.yaml` and adjust for your environment.
+- `bun run tui` — run `phi` TUI from `packages/phi` with `bun run --cwd`
+- `bun run dev:service` — run `phi` service in development from `packages/phi`
+- `bun run check` — run workspace checks
+- `bun run test:agent` — run `packages/phi` agent tests
 
-```bash
-cp phi.example.yaml ~/.phi/phi.yaml
-```
+## Application Docs
 
-## Storage
+- app package: `packages/phi`
+- app README: `packages/phi/README.md`
+- app architecture: `packages/phi/ARCHITECT.md`
 
-### Global operator-owned config
+## Pi Package
 
-```text
-~/.phi/
-├─ phi.yaml               # Operator-owned chat routing + agent config
-├─ pi/                    # TUI state
-│  ├─ sessions/
-│  ├─ memory/
-│  │  ├─ MEMORY.md
-│  │  └─ YYYY-MM-DD.md
-│  └─ skills/
-└─ auth/
-   └─ auth.json
-```
-
-Agents do not modify `~/.phi/phi.yaml`.
-
-### Service chat workspace
-
-Each configured chat points to a workspace. Phi scaffolds the workspace on first use.
-
-```text
-<workspace>/
-└─ .phi/
-   ├─ config.yaml            # Active workspace config
-   ├─ config.template.yaml   # Reference template
-   ├─ sessions/              # Session history
-   ├─ skills/                # Chat-scoped skills
-   ├─ memory/
-   │  ├─ MEMORY.md
-   │  └─ YYYY-MM-DD.md
-   ├─ inbox/                 # Inbound attachments
-   └─ cron/
-      └─ jobs/               # Cron prompt files
-```
-
-Workspace config is file-based:
-
-- read `.phi/config.template.yaml` to learn the shape
-- edit `.phi/config.yaml` to change chat-local settings
-- call `reload` to apply changes
-
-Current workspace config covers:
-
-- `chat.timezone`
-- `cron.enabled`
-- `cron.jobs`
-
-## Run
-
-### TUI
-
-TUI is a special phi chat with global state under `~/.phi/pi`:
-
-```bash
-bun index.ts tui
-```
-
-Its working directory is only execution context. Phi state still lives under `~/.phi/pi`.
-
-### Service
-
-Start the service:
-
-```bash
-bun index.ts service
-```
-
-Or in development:
-
-```bash
-bun run dev:service
-```
-
-Print the injected system prompt for service chats:
-
-```bash
-bun run dev:service:prompt
-```
-
-`--print-system-prompt` only affects service mode.
-
-## Logging
-
-Phi writes logs to stdio.
-
-- development: pretty console logs via `pino-pretty`
-- production: structured JSON logs to stdout for collectors such as `journald`
-
-Every log record includes a `tag` field such as `service`, `runtime`, `telegram`, or `cron`.
-
-Environment overrides:
-
-- `PHI_LOG_LEVEL`: `silent` | `debug` | `info` | `warn` | `error`
-- `PHI_LOG_FORMAT`: `pretty` | `json`
+The repository root is a pi package root.
+Future installable extensions live under `packages/pi-*` and are exposed through the root `pi` manifest.
+Built-in `phi` extensions stay inside `packages/phi` and are not installed through `phi pi install`.
