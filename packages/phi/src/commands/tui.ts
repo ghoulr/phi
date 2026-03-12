@@ -94,7 +94,7 @@ export async function createDefaultTuiSession(
 		workspacePath: cwd,
 		skills: resourceLoader.getSkills().skills,
 		memoryFilePath,
-		toolNames: session.getAllTools().map((tool) => tool.name),
+		toolNames: session.getActiveToolNames(),
 		includeWorkspaceConfigGuidance: false,
 	});
 	return session;

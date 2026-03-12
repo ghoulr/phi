@@ -176,6 +176,25 @@ describe("buildPhiSystemPrompt", () => {
 		}
 	});
 
+	it("omits non built-in extension tools from tools section", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				toolNames: ["websearch", "webfetch"],
+			});
+
+			expect(prompt.includes("- websearch:")).toBe(false);
+			expect(prompt.includes("- webfetch:")).toBe(false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("includes send tool guidance when send is active", () => {
 		const { dir, filePath } = createMemoryFile("# MEMORY\n");
 

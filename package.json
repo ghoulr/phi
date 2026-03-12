@@ -15,6 +15,7 @@
     "lint-staged": "lint-staged",
     "check": "bun run --filter '*' check",
     "test:agent": "bun run --cwd packages/phi test:agent && bun run --cwd packages/pi-web test:agent",
+    "pi": "bun run --cwd packages/phi index.ts pi",
     "tui": "bun run --cwd packages/phi tui",
     "dev:service": "bun run --cwd packages/phi dev:service",
     "dev:service:prompt": "bun run --cwd packages/phi dev:service:prompt"

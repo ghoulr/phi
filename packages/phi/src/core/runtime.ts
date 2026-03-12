@@ -185,7 +185,7 @@ async function resolvePhiSessionContext(
 }
 
 function getSessionToolNames(session: AgentSession): string[] {
-	return session.getAllTools().map((tool) => tool.name);
+	return session.getActiveToolNames();
 }
 
 function printInjectedSystemPrompt(systemPrompt: string): void {

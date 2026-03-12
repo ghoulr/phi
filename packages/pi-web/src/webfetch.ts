@@ -6,6 +6,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 
 import { getCachedWebText, setCachedWebText } from "./cache.ts";
+import { renderTextToolResult, renderToolCall } from "./render.ts";
 import { truncateToolText } from "./truncate.ts";
 
 const DEFAULT_TIMEOUT_MS = 25_000;
@@ -155,10 +156,6 @@ export async function executeWebfetch(
 	}
 
 	const body = await response.text();
-	if (contentType === "text/markdown") {
-		setCachedWebText(finalUrl, body);
-		return truncateToolText(body);
-	}
 	if (contentType !== "text/html") {
 		setCachedWebText(finalUrl, body);
 		return truncateToolText(body);
@@ -175,7 +172,7 @@ export async function executeWebfetch(
 
 export function createWebfetchTool(
 	dependencies: { execute?: typeof executeWebfetch } = {}
-): ToolDefinition {
+): ToolDefinition<typeof WebfetchSchema, Record<string, never>> {
 	const execute = dependencies.execute ?? executeWebfetch;
 	return {
 		name: "webfetch",
@@ -189,6 +186,17 @@ export function createWebfetchTool(
 			"If the URL points to a binary file, webfetch saves it to a temporary file path instead of returning raw bytes.",
 		],
 		parameters: WebfetchSchema,
+		renderCall(args, theme) {
+			return renderToolCall("webfetch", args.url, theme);
+		},
+		renderResult(result, options, theme) {
+			const text = result.content
+				.filter((item) => item.type === "text")
+				.map((item) => item.text)
+				.join("\n");
+			const summary = `${text.split("\n").length} lines`;
+			return renderTextToolResult(result, options, theme, summary);
+		},
 		async execute(
 			_toolCallId,
 			params: WebfetchInput,

@@ -26,55 +26,45 @@ const TOOL_DESCRIPTION_MAP: Record<string, string> = {
 	write: "Create or overwrite files",
 	reload: "Recreate the current chat session from workspace files",
 	send: "Send a user-visible message immediately or stage it for your final output",
-	grep: "Search file contents for patterns",
-	find: "Find files by glob pattern",
-	ls: "List directory contents",
 };
 
 interface ToolGuidelineRule {
-	readonly id: string;
 	readonly line: string;
 	matches(toolNames: Set<string>): boolean;
 }
 
 const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 	{
-		id: "read-edit",
 		line: "Use read to examine files before editing.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("read") && toolNames.has("edit");
 		},
 	},
 	{
-		id: "edit",
 		line: "Use edit for precise changes (old text must match exactly).",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("edit");
 		},
 	},
 	{
-		id: "write",
 		line: "Use write only for new files or complete rewrites.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("write");
 		},
 	},
 	{
-		id: "bash",
 		line: "Use bash for execution tasks; prefer dedicated tools when an equivalent first-class tool exists, use `date` for correct datetime before doing anything about time.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("bash");
 		},
 	},
 	{
-		id: "send",
 		line: "Use send for attachments, mentions, or explicit user-visible delivery.",
 		matches(toolNames: Set<string>): boolean {
 			return toolNames.has("send");
 		},
 	},
 	{
-		id: "destructive",
 		line: "For destructive actions, be explicit and cautious.",
 		matches(toolNames: Set<string>): boolean {
 			return (
@@ -100,27 +90,22 @@ function normalizeToolNames(toolNames: string[]): string[] {
 	return normalizedNames;
 }
 
-function buildToolsText(toolNames: string[]): string {
-	const normalizedNames = normalizeToolNames(toolNames);
-	if (normalizedNames.length === 0) {
-		return "- (none)";
-	}
+function buildToolsText(normalizedToolNames: string[]): string {
 	const lines: string[] = [];
-	for (const toolName of normalizedNames) {
+	for (const toolName of normalizedToolNames) {
 		const description = TOOL_DESCRIPTION_MAP[toolName.toLowerCase()];
-		if (description) {
-			lines.push(`- ${toolName}: ${description}`);
+		if (!description) {
 			continue;
 		}
-		lines.push(`- ${toolName}`);
+		lines.push(`- ${toolName}: ${description}`);
+	}
+	if (lines.length === 0) {
+		return "- (none)";
 	}
 	return lines.join("\n");
 }
 
-function buildToolGuidance(toolNames: string[]): string[] {
-	const normalizedToolNames = new Set(
-		normalizeToolNames(toolNames).map((toolName) => toolName.toLowerCase())
-	);
+function buildToolGuidance(normalizedToolNames: Set<string>): string[] {
 	const lines: string[] = [];
 	for (const rule of TOOL_GUIDELINE_RULES) {
 		if (rule.matches(normalizedToolNames)) {
@@ -215,8 +200,11 @@ export function buildPhiSystemPrompt(
 ): string {
 	const skillsText = buildSkillsText(params.skills);
 	const memoryText = readMemoryText(params.memoryFilePath);
-	const toolsText = buildToolsText(params.toolNames);
-	const toolGuidance = buildToolGuidance(params.toolNames);
+	const normalizedToolNames = normalizeToolNames(params.toolNames);
+	const toolsText = buildToolsText(normalizedToolNames);
+	const toolGuidance = buildToolGuidance(
+		new Set(normalizedToolNames.map((toolName) => toolName.toLowerCase()))
+	);
 
 	const lines = [
 		`You are ${params.assistantName}, a personal assistant. Be concise.`,

@@ -7,6 +7,7 @@ import type {
 import { Type, type Static } from "@sinclair/typebox";
 
 import { setCachedWebText } from "./cache.ts";
+import { renderTextToolResult, renderToolCall } from "./render.ts";
 import { truncateToolText } from "./truncate.ts";
 import { createWebfetchTool } from "./webfetch.ts";
 
@@ -14,6 +15,8 @@ export const DEFAULT_EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 export const DEFAULT_NUM_RESULTS = 8;
 export const DEFAULT_TEXT_MAX_CHARACTERS = 12_000;
 export const DEFAULT_TIMEOUT_MS = 25_000;
+
+const EXA_WEBSEARCH_TOOL = "web_search_advanced_exa";
 
 const WebsearchSchema = Type.Object({
 	query: Type.String({ description: "Web search query." }),
@@ -40,6 +43,7 @@ interface McpToolCallEnvelope {
 			type: string;
 			text?: string;
 		}>;
+		isError?: boolean;
 	};
 	error?: {
 		message?: string;
@@ -55,7 +59,7 @@ export interface ExaSearchItem {
 }
 
 interface ExaSearchResponse {
-	results: ExaSearchItem[];
+	results?: ExaSearchItem[];
 }
 
 export interface WebsearchResultItem {
@@ -68,6 +72,10 @@ export interface WebsearchResultItem {
 export interface WebsearchResult {
 	text: string;
 	items: WebsearchResultItem[];
+}
+
+interface WebsearchToolDetails {
+	items?: WebsearchResultItem[];
 }
 
 type FetchLike = (
@@ -105,7 +113,7 @@ function buildMcpRequestBody(input: WebsearchInput): string {
 		id: 1,
 		method: "tools/call",
 		params: {
-			name: "web_search_advanced_exa",
+			name: EXA_WEBSEARCH_TOOL,
 			arguments: {
 				query: input.query,
 				type: "auto",
@@ -124,6 +132,9 @@ function buildMcpRequestBody(input: WebsearchInput): string {
 
 export function resolveExaMcpUrl(env: NodeJS.ProcessEnv = process.env): string {
 	const url = new URL(env.EXA_MCP_URL?.trim() || DEFAULT_EXA_MCP_URL);
+	if (!url.searchParams.has("tools")) {
+		url.searchParams.set("tools", EXA_WEBSEARCH_TOOL);
+	}
 	const apiKey = env.EXA_API_KEY?.trim();
 	if (apiKey && !url.searchParams.has("exaApiKey")) {
 		url.searchParams.set("exaApiKey", apiKey);
@@ -135,48 +146,53 @@ function parseOuterEnvelope(text: string): McpToolCallEnvelope {
 	return JSON.parse(text) as McpToolCallEnvelope;
 }
 
-function extractMcpTextPayload(responseText: string): string {
-	const normalized = responseText.trim();
-	if (!normalized) {
-		throw new Error("Empty MCP response.");
+function getMcpResultText(envelope: McpToolCallEnvelope): string | undefined {
+	if (envelope.error?.message) {
+		throw new Error(envelope.error.message);
 	}
-	if (normalized.startsWith("{")) {
-		const envelope = parseOuterEnvelope(normalized);
-		if (envelope.error?.message) {
-			throw new Error(envelope.error.message);
-		}
-		const text = envelope.result?.content
-			?.find((item) => item.type === "text")
-			?.text?.trim();
-		if (!text) {
-			throw new Error("No search results found.");
-		}
-		return text;
+	const text = envelope.result?.content
+		?.find((item) => item.type === "text")
+		?.text?.trim();
+	if (!text) {
+		return undefined;
 	}
-
-	for (const line of normalized.split("\n")) {
-		if (!line.startsWith("data: ")) {
-			continue;
-		}
-		const envelope = parseOuterEnvelope(line.slice(6));
-		if (envelope.error?.message) {
-			throw new Error(envelope.error.message);
-		}
-		const text = envelope.result?.content
-			?.find((item) => item.type === "text")
-			?.text?.trim();
-		if (text) {
-			return text;
-		}
+	if (envelope.result?.isError) {
+		throw new Error(text);
 	}
-
-	throw new Error("No search results found.");
+	return text;
 }
 
 export function parseMcpToolCallResponse(
 	responseText: string
 ): ExaSearchResponse {
-	return JSON.parse(extractMcpTextPayload(responseText)) as ExaSearchResponse;
+	const normalized = responseText.trim();
+	if (!normalized) {
+		throw new Error("Empty MCP response.");
+	}
+
+	let payload: string | undefined;
+	if (normalized.startsWith("{")) {
+		payload = getMcpResultText(parseOuterEnvelope(normalized));
+	} else {
+		for (const line of normalized.split("\n")) {
+			if (!line.startsWith("data: ")) {
+				continue;
+			}
+			payload = getMcpResultText(parseOuterEnvelope(line.slice(6)));
+			if (payload) {
+				break;
+			}
+		}
+	}
+	if (!payload) {
+		throw new Error("No search results found.");
+	}
+
+	try {
+		return JSON.parse(payload) as ExaSearchResponse;
+	} catch {
+		throw new Error(payload);
+	}
 }
 
 function formatResultItems(
@@ -264,7 +280,7 @@ export async function executeExaWebsearch(
 
 export function createWebsearchTool(
 	dependencies: { execute?: typeof executeExaWebsearch } = {}
-): ToolDefinition {
+): ToolDefinition<typeof WebsearchSchema, WebsearchToolDetails> {
 	const execute = dependencies.execute ?? executeExaWebsearch;
 	return {
 		name: "websearch",
@@ -278,6 +294,16 @@ export function createWebsearchTool(
 			"Use livecrawl when freshness matters, such as recent news or fast-changing pages.",
 		],
 		parameters: WebsearchSchema,
+		renderCall(args, theme) {
+			return renderToolCall("websearch", args.query, theme);
+		},
+		renderResult(result, options, theme) {
+			const count = Array.isArray(result.details?.items)
+				? result.details.items.length
+				: 0;
+			const summary = count > 0 ? `${count} results` : "No results";
+			return renderTextToolResult(result, options, theme, summary);
+		},
 		async execute(
 			_toolCallId,
 			params: WebsearchInput,
