@@ -43,6 +43,7 @@ cron:
 
 - `id` must be unique within the chat
 - `prompt` is relative to `<workspace>/.phi/cron/`
+- prompt files should describe what to do when the job fires now, not setup text such as "task created" or "reminder enabled"
 - exactly one of `cron` or `at` must be set
 - `cron` uses chat timezone
 - `at` uses local wall-clock time (`YYYY-MM-DD HH:mm`)

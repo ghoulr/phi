@@ -145,6 +145,11 @@ describe("buildPhiSystemPrompt", () => {
 			expect(prompt.includes("- skills env")).toBe(true);
 			expect(
 				prompt.includes(
+					"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions."
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
 					"After workspace config changes, call `reload`."
 				)
 			).toBe(true);

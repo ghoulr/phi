@@ -156,6 +156,8 @@ function buildWorkspaceSection(params: {
 		"- cron",
 		"- skills env",
 		"",
+		"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions.",
+		"",
 		"After workspace config changes, call `reload`.",
 		"",
 		"See `docs/concepts/workspace-config.md`."
