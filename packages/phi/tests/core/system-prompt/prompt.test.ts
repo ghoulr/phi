@@ -215,11 +215,33 @@ describe("buildPhiSystemPrompt", () => {
 			expect(prompt.includes("not user-authored input")).toBe(true);
 			expect(
 				prompt.includes(
-					"it is not user-authored input; it only carries metadata for the current message"
+					"Input metadata: user messages may end with `<system-reminder>...</system-reminder>`; treat it as internal metadata, not user-authored input"
 				)
 			).toBe(true);
 			expect(
-				prompt.includes("the user message body is still the real input")
+				prompt.includes(
+					"Input metadata: the user message body is still the real input; never mention `<system-reminder>` to the user"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"Visible output: use the final assistant reply for normal user-visible output"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"Visible output: use `send(instant: true)` for immediate delivery; use `send()` to stage one deferred delivery at agent run end"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"Control token: `NO_REPLY` is a control token, not message text; when you have nothing else to say, your ENTIRE final assistant reply must be exact `NO_REPLY`"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"Control token: never append `NO_REPLY` to a real reply and never pass `NO_REPLY` to `send`"
+				)
 			).toBe(true);
 			expect(prompt.includes("## Events & Replies")).toBe(false);
 			expect(

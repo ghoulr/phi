@@ -30,6 +30,7 @@ Input:
 Rules:
 
 - `text` and `attachments` cannot both be empty
+- exact `NO_REPLY` is invalid input for `send`
 - `instant: true` delivers immediately
 - `instant: false` stages one deferred message for the active agent run
 - `mentionSender` resolves from the current turn's `system-reminder`
@@ -39,5 +40,6 @@ Rules:
 
 `NO_REPLY` is messaging-only semantics.
 It suppresses the final assistant text for the active messaging run.
+It is only valid as the exact final assistant reply, not as `send.text`.
 
 Messaging semantics (`NO_REPLY`, deferred drafts, sender mentions) live exclusively inside the extension.

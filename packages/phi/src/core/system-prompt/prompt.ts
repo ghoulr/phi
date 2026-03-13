@@ -165,10 +165,12 @@ function buildWorkspaceSection(params: {
 
 function buildMessageFormatSection(): string {
 	return [
-		"- user messages will end with a trailing `<system-reminder>...</system-reminder>` block which as attached system context",
-		"- it is not user-authored input; it only carries metadata for the current message",
-		"- the user message body is still the real input",
-		"- NEVER mention <system-reminder> to user, it's internal",
+		"- Input metadata: user messages may end with `<system-reminder>...</system-reminder>`; treat it as internal metadata, not user-authored input",
+		"- Input metadata: the user message body is still the real input; never mention `<system-reminder>` to the user",
+		"- Visible output: use the final assistant reply for normal user-visible output",
+		"- Visible output: use `send(instant: true)` for immediate delivery; use `send()` to stage one deferred delivery at agent run end",
+		"- Control token: `NO_REPLY` is a control token, not message text; when you have nothing else to say, your ENTIRE final assistant reply must be exact `NO_REPLY`",
+		"- Control token: never append `NO_REPLY` to a real reply and never pass `NO_REPLY` to `send`",
 	].join("\n");
 }
 

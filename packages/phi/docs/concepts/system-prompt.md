@@ -56,8 +56,11 @@ New sessions pick up the updated discovered skills.
 
 ## Message format
 
-User messages end with `<system-reminder>...</system-reminder>`.
-This is metadata, not user input. The agent should not mention it to the user.
+Phi groups message-format rules into three buckets:
+
+- Input metadata — user messages may end with `<system-reminder>...</system-reminder>`; this is internal metadata, not user input, and should never be mentioned to the user
+- Visible output — normal user-visible output should use the final assistant reply; `send(instant: true)` is for immediate delivery; `send()` stages one deferred delivery until agent run end
+- Control token — `NO_REPLY` is a control token, not message text; when nothing else should be said, the entire final assistant reply must be exact `NO_REPLY`; never append it to a real reply and never pass it to `send`
 
 ## Memory rules
 

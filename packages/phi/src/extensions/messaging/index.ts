@@ -14,7 +14,10 @@ import { normalizeUnknownError } from "@phi/core/user-error";
 import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
 import { resolvePhiMessagingOutput } from "@phi/extensions/messaging/resolve-output";
 import { resolveSenderMentionFromCurrentTurn } from "@phi/extensions/messaging/sender";
-import { NO_REPLY_TOKEN } from "@phi/extensions/messaging/tokens";
+import {
+	isNoReplyToken,
+	NO_REPLY_TOKEN,
+} from "@phi/extensions/messaging/tokens";
 import {
 	extractLastAssistantVisibleOutput,
 	type AssistantVisibleOutputSource,
@@ -108,6 +111,11 @@ function resolvePhiMessage(
 	const attachments = (input.attachments ?? []).map((attachment) =>
 		resolveAttachmentPath(ctx, attachment)
 	);
+	if (isNoReplyToken(text)) {
+		throw new Error(
+			"NO_REPLY is a control token and must only appear as the final assistant reply."
+		);
+	}
 	if (!text && attachments.length === 0) {
 		throw new Error("send requires text or at least one attachment");
 	}
@@ -199,7 +207,7 @@ async function executeSendTool(
 				content: [
 					{
 						type: "text",
-						text: "Message sent immediately. End with exact NO_REPLY if this already delivered everything.",
+						text: "Message sent immediately. If this already delivered everything the user should see, your ENTIRE final assistant reply must be exact NO_REPLY.",
 					},
 				],
 				details: { instant: true },
@@ -265,13 +273,14 @@ export function createPhiMessagingExtension(
 			name: "send",
 			label: "send",
 			description:
-				"Send a user-visible message immediately or stage it for agent run end.",
+				"Send a user-visible message immediately or stage one deferred message for agent run end.",
 			promptGuidelines: [
 				"Use send for attachments, mentions, or explicit user-visible delivery.",
 				"Use send(instant: true) to send a separate message immediately.",
 				"Without instant: true, send stages one deferred message for agent run end.",
-				`If send(instant: true) already delivered everything the user should see, end with exact ${NO_REPLY_TOKEN}.`,
-				`If the deferred send should be the only visible output, end with exact ${NO_REPLY_TOKEN}.`,
+				`If send already delivered everything the user should see, your ENTIRE final assistant reply must be exact ${NO_REPLY_TOKEN}.`,
+				`If the deferred send should be the only visible output, your ENTIRE final assistant reply must be exact ${NO_REPLY_TOKEN}.`,
+				`Never pass ${NO_REPLY_TOKEN} to send; it is only valid as the exact final assistant reply.`,
 			],
 			parameters: SendSchema,
 			execute: async (toolCallId, params, signal, onUpdate, ctx) => {

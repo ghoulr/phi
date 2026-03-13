@@ -337,6 +337,23 @@ describe("createPhiMessagingExtension", () => {
 		).rejects.toThrow("Only one deferred send is allowed per turn.");
 	});
 
+	it("fails when send text is exact NO_REPLY", async () => {
+		const harness = createHarness({ workspace: createWorkspace() });
+
+		await harness.handlers.get("agent_start")?.({ type: "agent_start" });
+		await expect(
+			harness.tool?.execute(
+				"call-1",
+				{ text: "NO_REPLY", instant: true },
+				undefined,
+				undefined,
+				harness.ctx
+			)
+		).rejects.toThrow(
+			"NO_REPLY is a control token and must only appear as the final assistant reply."
+		);
+	});
+
 	it("keeps mentionSender bound to the active turn", async () => {
 		let branchContent = buildReminderText({
 			id: "100",
