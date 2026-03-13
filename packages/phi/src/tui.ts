@@ -16,7 +16,7 @@ export function tui(dependencies: TuiDependencies): CAC {
 		await dependencies.runTui();
 	});
 
-	app.command("service", "Start channel service (currently Telegram polling)")
+	app.command("service", "Start endpoint service")
 		.option(
 			"--print-system-prompt",
 			"Print injected system prompt for service chat sessions"

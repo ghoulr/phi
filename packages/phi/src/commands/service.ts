@@ -18,9 +18,9 @@ import { startCronService, type RunningCronService } from "@phi/cron/service";
 import { PiChatHandler, type ChatHandler } from "@phi/services/chat-handler";
 import { ServiceRoutes } from "@phi/services/routes";
 import {
-	startTelegramPollingBot,
-	type ResolvedTelegramPollingBotConfig,
-	type RunningTelegramPollingBot,
+	startTelegramEndpoint as startTelegramService,
+	type ResolvedTelegramEndpointConfig,
+	type RunningTelegramEndpoint,
 	type TelegramRouteTarget,
 } from "@phi/services/telegram";
 
@@ -46,10 +46,10 @@ export interface ServiceCommandDependencies {
 		chatExecutor: ChatExecutor;
 		routes: ServiceRoutes;
 	}): ChatHandler;
-	startTelegramBot(
+	startTelegramEndpoint(
 		routes: ServiceRoutes,
-		config: ResolvedTelegramPollingBotConfig
-	): Promise<RunningTelegramPollingBot>;
+		config: ResolvedTelegramEndpointConfig
+	): Promise<RunningTelegramEndpoint>;
 	startCronRuntime(
 		phiConfig: PhiConfig,
 		chatConfigs: ResolvedCronChatServiceConfig[],
@@ -79,11 +79,11 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	createChatHandler(params): ChatHandler {
 		return new PiChatHandler(params);
 	},
-	startTelegramBot(
+	startTelegramEndpoint(
 		routes: ServiceRoutes,
-		config: ResolvedTelegramPollingBotConfig
-	): Promise<RunningTelegramPollingBot> {
-		return startTelegramPollingBot(routes, config);
+		config: ResolvedTelegramEndpointConfig
+	): Promise<RunningTelegramEndpoint> {
+		return startTelegramService(routes, config);
 	},
 	startCronRuntime(
 		phiConfig: PhiConfig,
@@ -100,9 +100,9 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	},
 };
 
-function buildTelegramBotConfigs(
+function buildTelegramEndpointConfigs(
 	chatConfigs: ResolvedTelegramChatServiceConfig[]
-): ResolvedTelegramPollingBotConfig[] {
+): ResolvedTelegramEndpointConfig[] {
 	const groupedRoutes = new Map<
 		string,
 		Record<string, TelegramRouteTarget>
@@ -198,7 +198,7 @@ export async function runServiceCommand(
 		cronChatCount: cronChats.length,
 		serviceChatCount: serviceChatIds.length,
 	});
-	const telegramBotConfigs = buildTelegramBotConfigs(telegramChats);
+	const telegramEndpointConfigs = buildTelegramEndpointConfigs(telegramChats);
 
 	const runningServices: RunningServicePart[] = [];
 	const chatHandlers: ChatHandler[] = [];
@@ -224,17 +224,18 @@ export async function runServiceCommand(
 			);
 		}
 
-		for (const botConfig of telegramBotConfigs) {
+		for (const endpointConfig of telegramEndpointConfigs) {
 			log.info("service.telegram.starting", {
-				routeCount: Object.keys(botConfig.chatRoutes).length,
+				routeCount: Object.keys(endpointConfig.chatRoutes).length,
 			});
-			const runningBot = await resolvedDependencies.startTelegramBot(
-				routes,
-				botConfig
-			);
-			runningServices.push(runningBot);
+			const runningEndpoint =
+				await resolvedDependencies.startTelegramEndpoint(
+					routes,
+					endpointConfig
+				);
+			runningServices.push(runningEndpoint);
 			log.info("service.telegram.started", {
-				routeCount: Object.keys(botConfig.chatRoutes).length,
+				routeCount: Object.keys(endpointConfig.chatRoutes).length,
 			});
 		}
 

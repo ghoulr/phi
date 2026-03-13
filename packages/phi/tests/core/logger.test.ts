@@ -88,7 +88,7 @@ describe("phi logger", () => {
 			direction: "outbound",
 			source: "assistant",
 			chatId: "alice",
-			channel: "telegram",
+			endpoint: "telegram",
 			telegramChatId: "42",
 			telegramUpdateId: "100",
 			telegramMessageId: "10",

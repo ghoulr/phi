@@ -1,5 +1,14 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
+import { formatUserFacingErrorMessage } from "@phi/core/user-error";
+
+export type AssistantVisibleOutputSource = "assistant" | "error";
+
+export interface AssistantVisibleOutput {
+	text: string;
+	source: AssistantVisibleOutputSource;
+}
+
 function extractAssistantText(message: AgentMessage): string | undefined {
 	if (message.role !== "assistant") {
 		return undefined;
@@ -26,17 +35,42 @@ function extractAssistantText(message: AgentMessage): string | undefined {
 	return text || undefined;
 }
 
-export function extractLastAssistantText(
+function extractAssistantVisibleOutput(
+	message: AgentMessage
+): AssistantVisibleOutput | undefined {
+	if (message.role !== "assistant") {
+		return undefined;
+	}
+
+	const text = extractAssistantText(message);
+	if (text) {
+		return {
+			text,
+			source: message.stopReason === "error" ? "error" : "assistant",
+		};
+	}
+
+	if (message.stopReason !== "error" || !message.errorMessage) {
+		return undefined;
+	}
+
+	return {
+		text: formatUserFacingErrorMessage(message.errorMessage),
+		source: "error",
+	};
+}
+
+export function extractLastAssistantVisibleOutput(
 	messages: AgentMessage[]
-): string | undefined {
+): AssistantVisibleOutput | undefined {
 	for (let index = messages.length - 1; index >= 0; index -= 1) {
 		const message = messages[index];
 		if (!message) {
 			continue;
 		}
-		const text = extractAssistantText(message);
-		if (text) {
-			return text;
+		const output = extractAssistantVisibleOutput(message);
+		if (output) {
+			return output;
 		}
 	}
 	return undefined;

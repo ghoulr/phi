@@ -9,16 +9,23 @@ import type {
 	ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
 
+import { getPhiLogger } from "@phi/core/logger";
+import { normalizeUnknownError } from "@phi/core/user-error";
 import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
 import { resolvePhiMessagingOutput } from "@phi/extensions/messaging/resolve-output";
 import { resolveSenderMentionFromCurrentTurn } from "@phi/extensions/messaging/sender";
 import { NO_REPLY_TOKEN } from "@phi/extensions/messaging/tokens";
-import { extractLastAssistantText } from "@phi/messaging/assistant-output";
+import {
+	extractLastAssistantVisibleOutput,
+	type AssistantVisibleOutputSource,
+} from "@phi/messaging/assistant-output";
 import type {
 	PhiMessage,
 	PhiMessageAttachment,
 	PhiMessageMention,
 } from "@phi/messaging/types";
+
+const log = getPhiLogger("messaging");
 
 const SendAttachmentSchema = Type.Object({
 	path: Type.String({ description: "Path to a file inside the workspace." }),
@@ -127,6 +134,41 @@ function stageDeferredMessage(
 	currentRun.deferredMessage = message;
 }
 
+function createDeliveryFields(
+	message: PhiMessage,
+	phase: "instant" | "final",
+	source: AssistantVisibleOutputSource
+): Record<string, number | string | boolean | undefined> {
+	return {
+		phase,
+		source,
+		hasText: typeof message.text === "string",
+		textLength: message.text?.length,
+		attachmentCount: message.attachments.length,
+		mentionCount: message.mentions?.length,
+	};
+}
+
+async function deliverMessageWithLogging(
+	dependencies: CreatePhiMessagingExtensionDependencies,
+	message: PhiMessage,
+	phase: "instant" | "final",
+	source: AssistantVisibleOutputSource
+): Promise<void> {
+	const fields = createDeliveryFields(message, phase, source);
+	log.info("messaging.outbound.delivering", fields);
+	try {
+		await dependencies.deliverMessage(message, phase);
+		log.info("messaging.outbound.delivered", fields);
+	} catch (error: unknown) {
+		log.error("messaging.outbound.failed", {
+			...fields,
+			err: normalizeUnknownError(error),
+		});
+		throw error;
+	}
+}
+
 async function executeSendTool(
 	_toolCallId: string,
 	input: SendInput,
@@ -146,7 +188,12 @@ async function executeSendTool(
 	const run = ensureRunState(currentRun);
 	const message = resolvePhiMessage(ctx, input, run);
 	if (input.instant === true) {
-		await dependencies.deliverMessage(message, "instant");
+		await deliverMessageWithLogging(
+			dependencies,
+			message,
+			"instant",
+			"assistant"
+		);
 		return {
 			result: {
 				content: [
@@ -191,12 +238,26 @@ export function createPhiMessagingExtension(
 		pi.on("agent_end", async (event) => {
 			const run = currentRun;
 			currentRun = undefined;
+			const assistantOutput = extractLastAssistantVisibleOutput(
+				event.messages
+			);
 			const outboundMessages = resolvePhiMessagingOutput({
-				assistantText: extractLastAssistantText(event.messages),
+				assistantText: assistantOutput?.text,
 				deferredMessage: run?.deferredMessage,
 			});
+			log.info("messaging.agent_end.resolved", {
+				source: assistantOutput?.source,
+				assistantTextLength: assistantOutput?.text.length,
+				hasDeferredMessage: Boolean(run?.deferredMessage),
+				outboundMessageCount: outboundMessages.length,
+			});
 			for (const message of outboundMessages) {
-				await dependencies.deliverMessage(message, "final");
+				await deliverMessageWithLogging(
+					dependencies,
+					message,
+					"final",
+					assistantOutput?.source ?? "assistant"
+				);
 			}
 		});
 

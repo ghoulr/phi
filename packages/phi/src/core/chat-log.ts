@@ -6,7 +6,7 @@ export type ChatLogSource = "user" | "assistant" | "error";
 
 export interface ChatLogEntry {
 	idempotencyKey: string;
-	channel: "telegram";
+	endpoint: "telegram";
 	chatId: string;
 	telegramChatId: string;
 	telegramUpdateId?: string;
@@ -18,7 +18,7 @@ export interface ChatLogEntry {
 
 export function appendChatLogEntry(entry: ChatLogEntry): void {
 	appendStructuredLogEntry({
-		tag: entry.channel,
+		tag: entry.endpoint,
 		event: "telegram.message",
 		category: "audit",
 		message: `telegram ${entry.direction} message`,

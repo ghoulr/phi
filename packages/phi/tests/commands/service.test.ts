@@ -65,8 +65,8 @@ function createRunningServiceStub(stopCalls?: { value: number }) {
 }
 
 describe("service command", () => {
-	it("starts grouped telegram bots from chat routes", async () => {
-		const startedBotConfigs: Array<{
+	it("starts grouped telegram endpoints from chat routes", async () => {
+		const startedEndpointConfigs: Array<{
 			token: string;
 			chatRoutes: Record<string, { chatId: string; workspace: string }>;
 		}> = [];
@@ -113,8 +113,8 @@ describe("service command", () => {
 			async startCronRuntime() {
 				return createRunningServiceStub();
 			},
-			async startTelegramBot(_routes, config) {
-				startedBotConfigs.push(config);
+			async startTelegramEndpoint(_routes, config) {
+				startedEndpointConfigs.push(config);
 				return createRunningServiceStub();
 			},
 		};
@@ -132,7 +132,7 @@ describe("service command", () => {
 			"user-bob",
 			"user-carol",
 		]);
-		expect(startedBotConfigs).toEqual([
+		expect(startedEndpointConfigs).toEqual([
 			{
 				token: "t1",
 				chatRoutes: {
@@ -191,7 +191,7 @@ describe("service command", () => {
 			async startCronRuntime() {
 				return createRunningServiceStub();
 			},
-			async startTelegramBot() {
+			async startTelegramEndpoint() {
 				return createRunningServiceStub();
 			},
 		};
@@ -242,7 +242,7 @@ describe("service command", () => {
 			async startCronRuntime() {
 				return createRunningServiceStub();
 			},
-			async startTelegramBot() {
+			async startTelegramEndpoint() {
 				throw new Error(
 					"Should not start any bot when config is invalid."
 				);
@@ -287,7 +287,7 @@ describe("service command", () => {
 			async startCronRuntime() {
 				return createRunningServiceStub(stopCalls);
 			},
-			async startTelegramBot(_routes, config) {
+			async startTelegramEndpoint(_routes, config) {
 				if (config.token === "t2") {
 					throw new Error("startup failed");
 				}

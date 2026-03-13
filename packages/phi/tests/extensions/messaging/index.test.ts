@@ -134,18 +134,27 @@ function buildReminderText(params: {
 	return lines.join("\n");
 }
 
-function createAgentEndEvent(text: string) {
+function createAgentEndEvent(params: {
+	text?: string;
+	stopReason?: "stop" | "error";
+	errorMessage?: string;
+}) {
+	const content = params.text ? [{ type: "text", text: params.text }] : [];
 	return {
 		type: "agent_end",
 		messages: [
 			{
 				role: "assistant",
-				content: [{ type: "text", text }],
+				content,
+				stopReason: params.stopReason ?? "stop",
+				errorMessage: params.errorMessage,
 			},
 		],
 		message: {
 			role: "assistant",
-			content: [{ type: "text", text }],
+			content,
+			stopReason: params.stopReason ?? "stop",
+			errorMessage: params.errorMessage,
 		},
 	};
 }
@@ -155,9 +164,27 @@ describe("createPhiMessagingExtension", () => {
 		const harness = createHarness({ workspace: createWorkspace() });
 
 		await harness.handlers.get("agent_start")?.({ type: "agent_start" });
-		await harness.handlers.get("agent_end")?.(createAgentEndEvent("done"));
+		await harness.handlers.get("agent_end")?.(
+			createAgentEndEvent({ text: "done" })
+		);
 
 		expect(harness.deliveries).toEqual([{ text: "done", attachments: [] }]);
+	});
+
+	it("delivers agent errors on agent end when assistant text is empty", async () => {
+		const harness = createHarness({ workspace: createWorkspace() });
+
+		await harness.handlers.get("agent_start")?.({ type: "agent_start" });
+		await harness.handlers.get("agent_end")?.(
+			createAgentEndEvent({
+				stopReason: "error",
+				errorMessage: "Provider returned error",
+			})
+		);
+
+		expect(harness.deliveries).toEqual([
+			{ text: "Provider returned error", attachments: [] },
+		]);
 	});
 
 	it("delivers instant messages immediately and suppresses the final NO_REPLY", async () => {
@@ -179,7 +206,7 @@ describe("createPhiMessagingExtension", () => {
 			harness.ctx
 		);
 		await harness.handlers.get("agent_end")?.(
-			createAgentEndEvent("NO_REPLY")
+			createAgentEndEvent({ text: "NO_REPLY" })
 		);
 
 		expect(harness.deliveries).toEqual([
@@ -207,7 +234,9 @@ describe("createPhiMessagingExtension", () => {
 			undefined,
 			harness.ctx
 		);
-		await harness.handlers.get("agent_end")?.(createAgentEndEvent("done"));
+		await harness.handlers.get("agent_end")?.(
+			createAgentEndEvent({ text: "done" })
+		);
 
 		expect(harness.deliveries).toEqual([
 			{
@@ -235,7 +264,7 @@ describe("createPhiMessagingExtension", () => {
 			harness.ctx
 		);
 		await harness.handlers.get("agent_end")?.(
-			createAgentEndEvent("NO_REPLY")
+			createAgentEndEvent({ text: "NO_REPLY" })
 		);
 
 		expect(harness.deliveries).toEqual([
