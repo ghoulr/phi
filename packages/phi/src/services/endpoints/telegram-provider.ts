@@ -14,7 +14,9 @@ import {
 
 import {
 	chunkAndSend,
+	createHashedInstanceId,
 	createIdempotencyKey,
+	DedupSet,
 	isImageAttachment,
 	saveInboundAttachment,
 } from "./shared.js";
@@ -27,7 +29,6 @@ import type {
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
-const DEDUP_MAX_SIZE = 10000;
 
 const log = getPhiLogger("telegram-provider");
 
@@ -80,30 +81,6 @@ export interface TelegramBotLike {
 
 export type TelegramBotFactory = (token: string) => TelegramBotLike;
 
-class DedupSet {
-	private readonly set = new Set<string>();
-
-	constructor(private readonly maxSize = DEDUP_MAX_SIZE) {}
-
-	has(key: string): boolean {
-		return this.set.has(key);
-	}
-
-	add(key: string): void {
-		if (this.set.size >= this.maxSize) {
-			const first = this.set.values().next().value;
-			if (first) {
-				this.set.delete(first);
-			}
-		}
-		this.set.add(key);
-	}
-
-	delete(key: string): void {
-		this.set.delete(key);
-	}
-}
-
 interface TelegramInboundCallbacks {
 	shouldProcess(routeId: string): boolean;
 	resolveWorkspace(routeId: string): string;
@@ -123,12 +100,7 @@ interface TelegramInboundCallbacks {
 }
 
 function createInstanceId(token: string): string {
-	let hash = 0x811c9dc5;
-	for (let i = 0; i < token.length; i++) {
-		hash ^= token.charCodeAt(i);
-		hash = Math.imul(hash, 0x01000193);
-	}
-	return `tg-${(hash >>> 0).toString(36).slice(0, 7)}`;
+	return createHashedInstanceId("tg", token);
 }
 
 type ReplyMessage = NonNullable<Message["reply_to_message"]>;

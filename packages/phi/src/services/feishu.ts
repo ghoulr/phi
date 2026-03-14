@@ -14,10 +14,12 @@ import type { PhiMessage } from "@phi/messaging/types";
 import type { ServiceRoutes } from "@phi/services/routes";
 
 import {
-	TelegramProvider,
-	type TelegramBotFactory,
-	type TelegramRouteTarget,
-} from "./endpoints/telegram-provider.js";
+	FeishuProvider,
+	type FeishuClientFactory,
+	type FeishuEventDispatcherFactory,
+	type FeishuRouteTarget,
+	type FeishuWsClientFactory,
+} from "./endpoints/feishu-provider.js";
 import {
 	createIdempotencyKey,
 	resolveOutboundAuditText,
@@ -28,66 +30,75 @@ import type {
 } from "./endpoints/types.js";
 
 export type {
-	TelegramRouteTarget,
-	TelegramBotFactory,
-} from "./endpoints/telegram-provider.js";
+	FeishuClientFactory,
+	FeishuEventDispatcherFactory,
+	FeishuRouteTarget,
+	FeishuWsClientFactory,
+} from "./endpoints/feishu-provider.js";
 
-const log = getPhiLogger("telegram");
+const log = getPhiLogger("feishu");
 
-export interface RunningTelegramEndpoint {
+export interface RunningFeishuEndpoint {
 	done: Promise<void>;
 	stop(): Promise<void>;
 }
 
-export interface ResolvedTelegramEndpointConfig {
-	token: string;
-	chatRoutes: Record<string, TelegramRouteTarget>;
+export interface ResolvedFeishuEndpointConfig {
+	appId: string;
+	appSecret: string;
+	chatRoutes: Record<string, FeishuRouteTarget>;
+}
+
+export interface FeishuEndpointDependencies {
+	clientFactory?: FeishuClientFactory;
+	eventDispatcherFactory?: FeishuEventDispatcherFactory;
+	wsClientFactory?: FeishuWsClientFactory;
 }
 
 function createOutboundAuditKey(routeId: string): string {
-	return createIdempotencyKey("telegram", routeId, "outbound", randomUUID());
+	return createIdempotencyKey("feishu", routeId, "outbound", randomUUID());
 }
 
-function appendTelegramOutboundAssistantLog(params: {
+function appendFeishuOutboundAssistantLog(params: {
 	idempotencyKey: string;
 	routeId: string;
-	target: TelegramRouteTarget;
+	target: FeishuRouteTarget;
 	message: PhiMessage;
 }): void {
 	appendChatLogEntry({
 		idempotencyKey: params.idempotencyKey,
-		endpoint: "telegram",
+		endpoint: "feishu",
 		chatId: params.target.chatId,
-		telegramChatId: params.routeId,
+		feishuChatId: params.routeId,
 		direction: "outbound",
 		source: "assistant",
 		text: resolveOutboundAuditText(params.message),
 	});
 }
 
-function appendTelegramOutboundErrorLog(params: {
+function appendFeishuOutboundErrorLog(params: {
 	idempotencyKey: string;
 	routeId: string;
-	target: TelegramRouteTarget;
+	target: FeishuRouteTarget;
 	errorText: string;
 }): void {
 	appendChatLogEntry({
 		idempotencyKey: params.idempotencyKey,
-		endpoint: "telegram",
+		endpoint: "feishu",
 		chatId: params.target.chatId,
-		telegramChatId: params.routeId,
+		feishuChatId: params.routeId,
 		direction: "outbound",
 		source: "error",
 		text: params.errorText,
 	});
 }
 
-export async function startTelegramEndpoint(
+export async function startFeishuEndpoint(
 	routes: ServiceRoutes,
-	config: ResolvedTelegramEndpointConfig,
-	botFactory?: TelegramBotFactory
-): Promise<RunningTelegramEndpoint> {
-	log.info("telegram.bot.starting", {
+	config: ResolvedFeishuEndpointConfig,
+	dependencies: FeishuEndpointDependencies = {}
+): Promise<RunningFeishuEndpoint> {
+	log.info("feishu.ws.starting", {
 		routeCount: Object.keys(config.chatRoutes).length,
 		sessionIds: Object.values(config.chatRoutes).map(
 			(target) => target.sessionId
@@ -114,31 +125,31 @@ export async function startTelegramEndpoint(
 
 		onSuccess(
 			routeId: string,
-			updateId: number,
+			eventId: string,
 			messageId: string,
 			text?: string,
 			attachments?: EndpointAttachment[]
 		): void {
 			const target = config.chatRoutes[routeId];
-			if (!target) return;
-
+			if (!target) {
+				return;
+			}
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
-					"telegram",
+					"feishu",
 					routeId,
-					updateId
+					eventId
 				),
-				endpoint: "telegram",
+				endpoint: "feishu",
 				chatId: target.chatId,
-				telegramChatId: routeId,
-				telegramUpdateId: String(updateId),
-				telegramMessageId: messageId,
+				feishuChatId: routeId,
+				feishuEventId: eventId,
+				feishuMessageId: messageId,
 				direction: "inbound",
 				source: "user",
 				text: text ?? `[${attachments?.length ?? 0} attachment(s)]`,
 			});
-
-			log.info("telegram.message.completed", {
+			log.info("feishu.message.completed", {
 				routeId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
@@ -148,31 +159,33 @@ export async function startTelegramEndpoint(
 
 		onError(
 			routeId: string,
-			updateId: number,
+			eventId: string,
 			messageId: string,
 			error: unknown
 		): void {
 			const target = config.chatRoutes[routeId];
-			if (!target) return;
-
+			if (!target) {
+				return;
+			}
 			const errorText = formatUserFacingErrorMessage(error);
-			log.error("telegram.message.failed", {
+			log.error("feishu.message.failed", {
 				routeId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
 				messageId,
 				err: normalizeUnknownError(error),
 			});
-
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
-					"telegram",
+					"feishu",
 					routeId,
-					updateId
+					eventId
 				),
-				endpoint: "telegram",
+				endpoint: "feishu",
 				chatId: target.chatId,
-				telegramChatId: routeId,
+				feishuChatId: routeId,
+				feishuEventId: eventId,
+				feishuMessageId: messageId,
 				direction: "outbound",
 				source: "error",
 				text: errorText,
@@ -184,7 +197,7 @@ export async function startTelegramEndpoint(
 		const target = config.chatRoutes[ctx.routeId];
 		if (!target) {
 			throw new Error(
-				`No session configured for telegram chat id: ${ctx.routeId}`
+				`No session configured for feishu chat id: ${ctx.routeId}`
 			);
 		}
 		await routes.dispatchInteractive(ctx.instanceId, ctx.routeId, {
@@ -195,9 +208,12 @@ export async function startTelegramEndpoint(
 		});
 	};
 
-	const provider = TelegramProvider.create({
-		token: config.token,
-		botFactory,
+	const provider = FeishuProvider.create({
+		appId: config.appId,
+		appSecret: config.appSecret,
+		clientFactory: dependencies.clientFactory,
+		eventDispatcherFactory: dependencies.eventDispatcherFactory,
+		wsClientFactory: dependencies.wsClientFactory,
 		callbacks,
 		onMessage,
 	});
@@ -222,28 +238,28 @@ export async function startTelegramEndpoint(
 						textLength: message.text?.length,
 						attachmentCount: message.attachments.length,
 					};
-					log.info("telegram.outbound.sending", fields);
+					log.info("feishu.outbound.sending", fields);
 					try {
 						await provider.send(routeId, {
 							text: message.text,
 							attachments: message.attachments,
 						});
-						appendTelegramOutboundAssistantLog({
+						appendFeishuOutboundAssistantLog({
 							idempotencyKey,
 							routeId,
 							target,
 							message,
 						});
-						log.info("telegram.outbound.sent", fields);
+						log.info("feishu.outbound.sent", fields);
 					} catch (error: unknown) {
 						const errorText = formatUserFacingErrorMessage(error);
-						appendTelegramOutboundErrorLog({
+						appendFeishuOutboundErrorLog({
 							idempotencyKey,
 							routeId,
 							target,
 							errorText,
 						});
-						log.error("telegram.outbound.failed", {
+						log.error("feishu.outbound.failed", {
 							...fields,
 							err: normalizeUnknownError(error),
 						});
@@ -265,31 +281,40 @@ export async function startTelegramEndpoint(
 		}
 	}
 
-	const runningDone = provider
-		.startWithFatalHandler()
-		.then(
-			() => {
-				log.info("telegram.bot.started", {
-					routeCount: Object.keys(config.chatRoutes).length,
-				});
-			},
-			(error: unknown) => {
-				log.error("telegram.bot.stopped_with_error", {
-					err: normalizeUnknownError(error),
-				});
-				throw error;
-			}
-		)
+	try {
+		await provider.startWithFatalHandler();
+	} catch (error: unknown) {
+		unregisterAllRoutes();
+		await provider.stop();
+		throw error;
+	}
+
+	log.info("feishu.ws.started", {
+		routeCount: Object.keys(config.chatRoutes).length,
+	});
+
+	const runningDone = provider.done
+		.catch((error: unknown) => {
+			log.error("feishu.ws.stopped_with_error", {
+				err: normalizeUnknownError(error),
+			});
+			throw error;
+		})
 		.finally(() => {
 			unregisterAllRoutes();
 		});
 
+	let stopping = false;
 	return {
 		done: runningDone,
 		async stop(): Promise<void> {
+			if (stopping) {
+				return;
+			}
+			stopping = true;
 			unregisterAllRoutes();
 			await provider.stop();
-			log.info("telegram.bot.stopped", {
+			log.info("feishu.ws.stopped", {
 				routeCount: Object.keys(config.chatRoutes).length,
 			});
 		},

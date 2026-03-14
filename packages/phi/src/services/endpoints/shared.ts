@@ -9,7 +9,7 @@ import {
 	chunkTextForOutbound,
 	sanitizeOutboundText,
 } from "@phi/core/message-text";
-import type { PhiMessageAttachment } from "@phi/messaging/types";
+import type { PhiMessage, PhiMessageAttachment } from "@phi/messaging/types";
 
 import type { EndpointAttachment } from "./types.js";
 
@@ -25,6 +25,43 @@ export interface SaveAttachmentParams {
 
 export interface SavedAttachment extends EndpointAttachment {
 	path: string;
+}
+
+export class DedupSet {
+	private readonly set = new Set<string>();
+
+	constructor(private readonly maxSize = 10000) {}
+
+	has(key: string): boolean {
+		return this.set.has(key);
+	}
+
+	add(key: string): void {
+		if (this.set.size >= this.maxSize) {
+			const first = this.set.values().next().value;
+			if (first) {
+				this.set.delete(first);
+			}
+		}
+		this.set.add(key);
+	}
+
+	delete(key: string): void {
+		this.set.delete(key);
+	}
+}
+
+export function createHashedInstanceId(
+	prefix: string,
+	value: string,
+	suffixLength = 7
+): string {
+	let hash = 0x811c9dc5;
+	for (let i = 0; i < value.length; i++) {
+		hash ^= value.charCodeAt(i);
+		hash = Math.imul(hash, 0x01000193);
+	}
+	return `${prefix}-${(hash >>> 0).toString(36).slice(0, suffixLength)}`;
 }
 
 export function buildInboxDatePrefix(now: Date = new Date()): string {
@@ -111,6 +148,10 @@ export function createIdempotencyKey(
 	...parts: (string | number)[]
 ): string {
 	return `${endpoint}:${parts.map(String).join(":")}`;
+}
+
+export function resolveOutboundAuditText(message: PhiMessage): string {
+	return message.text ?? `[${message.attachments.length} attachment(s)]`;
 }
 
 export async function isImageAttachment(

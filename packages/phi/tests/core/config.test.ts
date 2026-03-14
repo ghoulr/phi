@@ -6,6 +6,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	assertUniqueChatWorkspaces,
+	collectFeishuSessionServiceConfigs,
 	collectTelegramSessionServiceConfigs,
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
@@ -99,6 +100,44 @@ describe("phi config", () => {
 		]);
 	});
 
+	it("collects feishu routes from sessions", () => {
+		expect(
+			collectFeishuSessionServiceConfigs({
+				chats: {
+					shared: {
+						workspace: "~/active",
+					},
+				},
+				sessions: {
+					"session-no-feishu": {
+						chat: "shared",
+						agent: "main",
+					},
+					"session-active": {
+						chat: "shared",
+						agent: "support",
+						routes: {
+							feishu: {
+								id: "oc_1002",
+								appId: "cli_app_1",
+								appSecret: "secret-1",
+							},
+						},
+					},
+				},
+			})
+		).toEqual([
+			{
+				sessionId: "session-active",
+				chatId: "shared",
+				workspace: "~/active",
+				feishuChatId: "oc_1002",
+				appId: "cli_app_1",
+				appSecret: "secret-1",
+			},
+		]);
+	});
+
 	it("collects cron sessions", () => {
 		expect(
 			resolveCronSessionServiceConfigs({
@@ -188,6 +227,31 @@ describe("phi config", () => {
 			})
 		).toThrow(
 			"Invalid telegram route for session alice-main: missing token"
+		);
+	});
+
+	it("fails when feishu route app secret is missing", () => {
+		expect(() =>
+			collectFeishuSessionServiceConfigs({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						routes: {
+							feishu: {
+								id: "oc_1001",
+								appId: "cli_app_1",
+								appSecret: "",
+							},
+						},
+					},
+				},
+			})
+		).toThrow(
+			"Invalid feishu route for session alice-main: missing appSecret"
 		);
 	});
 

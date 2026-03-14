@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import type {
 	AssistantMessage,
 	ImageContent,
@@ -183,7 +181,9 @@ function buildInteractiveInputText(input: InteractiveInput): string {
 	return lines.join("\n\n");
 }
 
-function createImageContent(attachment: InteractiveAttachment): ImageContent {
+async function createImageContent(
+	attachment: InteractiveAttachment
+): Promise<ImageContent> {
 	const mimeType = resolveAttachmentMimeType(attachment);
 	if (!mimeType || !mimeType.startsWith("image/")) {
 		throw new Error(`Attachment is not an image: ${attachment.path}`);
@@ -191,13 +191,15 @@ function createImageContent(attachment: InteractiveAttachment): ImageContent {
 	return {
 		type: "image",
 		mimeType,
-		data: Buffer.from(readFileSync(attachment.path)).toString("base64"),
+		data: Buffer.from(
+			await Bun.file(attachment.path).arrayBuffer()
+		).toString("base64"),
 	};
 }
 
-function buildInteractiveAgentContent(
+async function buildInteractiveAgentContent(
 	input: InteractiveInput
-): string | (TextContent | ImageContent)[] {
+): Promise<string | (TextContent | ImageContent)[]> {
 	const reminder = buildPhiSystemReminder(input.metadata);
 	if (input.attachments.length === 0) {
 		const normalizedText = input.text?.trim();
@@ -212,9 +214,11 @@ function buildInteractiveAgentContent(
 	const sanitizedText = sanitizeInboundTextOrThrow(
 		buildInteractiveInputText(input)
 	);
-	const imageContents = input.attachments
-		.filter((attachment) => isImageAttachment(attachment))
-		.map((attachment) => createImageContent(attachment));
+	const imageContents = await Promise.all(
+		input.attachments
+			.filter((attachment) => isImageAttachment(attachment))
+			.map((attachment) => createImageContent(attachment))
+	);
 	if (imageContents.length === 0) {
 		return appendPhiSystemReminderToUserContent(sanitizedText, reminder);
 	}
@@ -495,7 +499,7 @@ export class PiSessionRuntime implements Session {
 	public async submitInteractive(input: InteractiveInput): Promise<void> {
 		try {
 			await this.interactiveSession.submit({
-				content: buildInteractiveAgentContent(input),
+				content: await buildInteractiveAgentContent(input),
 				sendTyping: input.sendTyping,
 			});
 		} catch (error: unknown) {

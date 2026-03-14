@@ -9,6 +9,7 @@ import {
 import type {
 	PhiConfig,
 	ResolvedCronSessionServiceConfig,
+	ResolvedFeishuSessionServiceConfig,
 	ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
 import type { SessionRuntime } from "@phi/core/runtime";
@@ -45,6 +46,20 @@ function createCronSessionConfig(
 		sessionId: "alice-cron",
 		chatId: "user-alice",
 		workspace: "~/phi/workspaces/alice",
+		...overrides,
+	};
+}
+
+function createFeishuSessionConfig(
+	overrides?: Partial<ResolvedFeishuSessionServiceConfig>
+): ResolvedFeishuSessionServiceConfig {
+	return {
+		sessionId: "alice-feishu",
+		chatId: "user-alice",
+		workspace: "~/phi/workspaces/alice",
+		feishuChatId: "oc_1001",
+		appId: "cli_app_1",
+		appSecret: "secret-1",
 		...overrides,
 	};
 }
@@ -100,6 +115,9 @@ describe("service command", () => {
 						token: "t2",
 					}),
 				];
+			},
+			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
+				return [];
 			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
 				return [createCronSessionConfig()];
@@ -190,6 +208,9 @@ describe("service command", () => {
 					}),
 				];
 			},
+			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
+				return [];
+			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
 				return [];
 			},
@@ -223,6 +244,171 @@ describe("service command", () => {
 			runServiceCommand(fakeRuntime, {} satisfies PhiConfig, dependencies)
 		).rejects.toThrow(
 			"Duplicate telegram route for token t1 and chat id 1001"
+		);
+	});
+
+	it("starts grouped feishu endpoints from session routes", async () => {
+		const startedEndpointConfigs: Array<{
+			appId: string;
+			appSecret: string;
+			chatRoutes: Record<
+				string,
+				{ sessionId: string; chatId: string; workspace: string }
+			>;
+		}> = [];
+		const dependencies: Partial<ServiceCommandDependencies> = {
+			resolveTelegramSessions(): ResolvedTelegramSessionServiceConfig[] {
+				return [];
+			},
+			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
+				return [
+					createFeishuSessionConfig({
+						sessionId: "alice-feishu",
+						chatId: "user-alice",
+						feishuChatId: "oc_1001",
+						appId: "cli_app_1",
+						appSecret: "secret-1",
+					}),
+					createFeishuSessionConfig({
+						sessionId: "bob-feishu",
+						chatId: "user-bob",
+						workspace: "~/phi/workspaces/bob",
+						feishuChatId: "oc_1002",
+						appId: "cli_app_1",
+						appSecret: "secret-1",
+					}),
+					createFeishuSessionConfig({
+						sessionId: "carol-feishu",
+						chatId: "user-carol",
+						workspace: "~/phi/workspaces/carol",
+						feishuChatId: "oc_2001",
+						appId: "cli_app_2",
+						appSecret: "secret-2",
+					}),
+				];
+			},
+			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
+				return [];
+			},
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createSession() {
+				return {
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					async validateReload() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub();
+			},
+			async startFeishuEndpoint(_routes, config) {
+				startedEndpointConfigs.push(config);
+				return createRunningServiceStub();
+			},
+		};
+
+		const service = runServiceCommand(
+			fakeRuntime,
+			{} satisfies PhiConfig,
+			dependencies
+		);
+		await Bun.sleep(0);
+		process.emit("SIGTERM");
+		await service;
+		expect(startedEndpointConfigs).toEqual([
+			{
+				appId: "cli_app_1",
+				appSecret: "secret-1",
+				chatRoutes: {
+					oc_1001: {
+						sessionId: "alice-feishu",
+						chatId: "user-alice",
+						workspace: "~/phi/workspaces/alice",
+					},
+					oc_1002: {
+						sessionId: "bob-feishu",
+						chatId: "user-bob",
+						workspace: "~/phi/workspaces/bob",
+					},
+				},
+			},
+			{
+				appId: "cli_app_2",
+				appSecret: "secret-2",
+				chatRoutes: {
+					oc_2001: {
+						sessionId: "carol-feishu",
+						chatId: "user-carol",
+						workspace: "~/phi/workspaces/carol",
+					},
+				},
+			},
+		]);
+	});
+
+	it("fails fast when duplicate feishu route exists under same app", async () => {
+		const dependencies: Partial<ServiceCommandDependencies> = {
+			resolveTelegramSessions(): ResolvedTelegramSessionServiceConfig[] {
+				return [];
+			},
+			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
+				return [
+					createFeishuSessionConfig({
+						sessionId: "alice-feishu",
+						feishuChatId: "oc_1001",
+						appId: "cli_app_1",
+						appSecret: "secret-1",
+					}),
+					createFeishuSessionConfig({
+						sessionId: "bob-feishu",
+						chatId: "user-bob",
+						feishuChatId: "oc_1001",
+						appId: "cli_app_1",
+						appSecret: "secret-1",
+					}),
+				];
+			},
+			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
+				return [];
+			},
+			createRoutes(): ServiceRoutes {
+				return new ServiceRoutes();
+			},
+			createSession() {
+				return {
+					async submitInteractive() {},
+					async submitCron() {
+						return [];
+					},
+					async validateReload() {
+						return [];
+					},
+					invalidate() {},
+					dispose() {},
+				};
+			},
+			async startCronRuntime() {
+				return createRunningServiceStub();
+			},
+			async startFeishuEndpoint() {
+				throw new Error(
+					"Should not start any feishu client when config is invalid."
+				);
+			},
+		};
+
+		await expect(
+			runServiceCommand(fakeRuntime, {} satisfies PhiConfig, dependencies)
+		).rejects.toThrow(
+			"Duplicate feishu route for app cli_app_1 and chat id oc_1001"
 		);
 	});
 });

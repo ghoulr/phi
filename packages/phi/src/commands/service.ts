@@ -5,10 +5,12 @@ import {
 	type SessionExecutor,
 } from "@phi/core/session-executor";
 import {
+	collectFeishuSessionServiceConfigs,
 	collectTelegramSessionServiceConfigs,
 	resolveCronSessionServiceConfigs,
 	type PhiConfig,
 	type ResolvedCronSessionServiceConfig,
+	type ResolvedFeishuSessionServiceConfig,
 	type ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
@@ -17,6 +19,12 @@ import type { SessionRuntime } from "@phi/core/runtime";
 import { startCronService, type RunningCronService } from "@phi/cron/service";
 import { PiSessionRuntime, type Session } from "@phi/services/session";
 import { ServiceRoutes } from "@phi/services/routes";
+import {
+	startFeishuEndpoint as startFeishuService,
+	type FeishuRouteTarget,
+	type ResolvedFeishuEndpointConfig,
+	type RunningFeishuEndpoint,
+} from "@phi/services/feishu";
 import {
 	startTelegramEndpoint as startTelegramService,
 	type ResolvedTelegramEndpointConfig,
@@ -35,6 +43,9 @@ export interface ServiceCommandDependencies {
 	resolveTelegramSessions(
 		phiConfig: PhiConfig
 	): ResolvedTelegramSessionServiceConfig[];
+	resolveFeishuSessions(
+		phiConfig: PhiConfig
+	): ResolvedFeishuSessionServiceConfig[];
 	resolveCronSessions(
 		phiConfig: PhiConfig
 	): ResolvedCronSessionServiceConfig[];
@@ -54,6 +65,10 @@ export interface ServiceCommandDependencies {
 		routes: ServiceRoutes,
 		config: ResolvedTelegramEndpointConfig
 	): Promise<RunningTelegramEndpoint>;
+	startFeishuEndpoint(
+		routes: ServiceRoutes,
+		config: ResolvedFeishuEndpointConfig
+	): Promise<RunningFeishuEndpoint>;
 	startCronRuntime(
 		phiConfig: PhiConfig,
 		sessionConfigs: ResolvedCronSessionServiceConfig[],
@@ -67,6 +82,11 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 		phiConfig: PhiConfig
 	): ResolvedTelegramSessionServiceConfig[] {
 		return collectTelegramSessionServiceConfigs(phiConfig);
+	},
+	resolveFeishuSessions(
+		phiConfig: PhiConfig
+	): ResolvedFeishuSessionServiceConfig[] {
+		return collectFeishuSessionServiceConfigs(phiConfig);
 	},
 	resolveCronSessions(
 		phiConfig: PhiConfig
@@ -90,6 +110,12 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 		config: ResolvedTelegramEndpointConfig
 	): Promise<RunningTelegramEndpoint> {
 		return startTelegramService(routes, config);
+	},
+	startFeishuEndpoint(
+		routes: ServiceRoutes,
+		config: ResolvedFeishuEndpointConfig
+	): Promise<RunningFeishuEndpoint> {
+		return startFeishuService(routes, config);
 	},
 	startCronRuntime(
 		phiConfig: PhiConfig,
@@ -139,31 +165,61 @@ function buildTelegramEndpointConfigs(
 	}));
 }
 
-function collectServiceSessions(params: {
-	telegramSessions: ResolvedTelegramSessionServiceConfig[];
-	cronSessions: ResolvedCronSessionServiceConfig[];
-}): Array<{ sessionId: string; chatId: string }> {
+function buildFeishuEndpointConfigs(
+	sessionConfigs: ResolvedFeishuSessionServiceConfig[]
+): ResolvedFeishuEndpointConfig[] {
+	const groupedRoutes = new Map<
+		string,
+		{
+			appId: string;
+			appSecret: string;
+			chatRoutes: Record<string, FeishuRouteTarget>;
+		}
+	>();
+
+	for (const sessionConfig of sessionConfigs) {
+		const configKey = `${sessionConfig.appId}\u0000${sessionConfig.appSecret}`;
+		let groupedConfig = groupedRoutes.get(configKey);
+		if (!groupedConfig) {
+			groupedConfig = {
+				appId: sessionConfig.appId,
+				appSecret: sessionConfig.appSecret,
+				chatRoutes: {},
+			};
+			groupedRoutes.set(configKey, groupedConfig);
+		}
+
+		if (groupedConfig.chatRoutes[sessionConfig.feishuChatId]) {
+			throw new Error(
+				`Duplicate feishu route for app ${sessionConfig.appId} and chat id ${sessionConfig.feishuChatId}`
+			);
+		}
+		groupedConfig.chatRoutes[sessionConfig.feishuChatId] = {
+			sessionId: sessionConfig.sessionId,
+			chatId: sessionConfig.chatId,
+			workspace: sessionConfig.workspace,
+		};
+	}
+
+	return Array.from(groupedRoutes.values());
+}
+
+function collectServiceSessions(
+	...groups: Array<Array<{ sessionId: string; chatId: string }>>
+): Array<{ sessionId: string; chatId: string }> {
 	const sessions: Array<{ sessionId: string; chatId: string }> = [];
 	const seenSessionIds = new Set<string>();
-	for (const sessionConfig of params.cronSessions) {
-		if (seenSessionIds.has(sessionConfig.sessionId)) {
-			continue;
+	for (const group of groups) {
+		for (const sessionConfig of group) {
+			if (seenSessionIds.has(sessionConfig.sessionId)) {
+				continue;
+			}
+			seenSessionIds.add(sessionConfig.sessionId);
+			sessions.push({
+				sessionId: sessionConfig.sessionId,
+				chatId: sessionConfig.chatId,
+			});
 		}
-		seenSessionIds.add(sessionConfig.sessionId);
-		sessions.push({
-			sessionId: sessionConfig.sessionId,
-			chatId: sessionConfig.chatId,
-		});
-	}
-	for (const sessionConfig of params.telegramSessions) {
-		if (seenSessionIds.has(sessionConfig.sessionId)) {
-			continue;
-		}
-		seenSessionIds.add(sessionConfig.sessionId);
-		sessions.push({
-			sessionId: sessionConfig.sessionId,
-			chatId: sessionConfig.chatId,
-		});
 	}
 	return sessions;
 }
@@ -199,21 +255,26 @@ export async function runServiceCommand(
 	};
 	const telegramSessions =
 		resolvedDependencies.resolveTelegramSessions(phiConfig);
+	const feishuSessions =
+		resolvedDependencies.resolveFeishuSessions(phiConfig);
 	const cronSessions = resolvedDependencies.resolveCronSessions(phiConfig);
 	const sessionExecutor = resolvedDependencies.createSessionExecutor();
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
 	const routes = resolvedDependencies.createRoutes();
-	const serviceSessions = collectServiceSessions({
-		telegramSessions,
+	const serviceSessions = collectServiceSessions(
 		cronSessions,
-	});
+		telegramSessions,
+		feishuSessions
+	);
 	log.info("service.command.starting", {
 		telegramSessionCount: telegramSessions.length,
+		feishuSessionCount: feishuSessions.length,
 		cronSessionCount: cronSessions.length,
 		serviceSessionCount: serviceSessions.length,
 	});
 	const telegramEndpointConfigs =
 		buildTelegramEndpointConfigs(telegramSessions);
+	const feishuEndpointConfigs = buildFeishuEndpointConfigs(feishuSessions);
 
 	const runningServices: RunningServicePart[] = [];
 	const sessions: Session[] = [];
@@ -264,6 +325,21 @@ export async function runServiceCommand(
 				);
 			runningServices.push(runningEndpoint);
 			log.info("service.telegram.started", {
+				routeCount: Object.keys(endpointConfig.chatRoutes).length,
+			});
+		}
+
+		for (const endpointConfig of feishuEndpointConfigs) {
+			log.info("service.feishu.starting", {
+				routeCount: Object.keys(endpointConfig.chatRoutes).length,
+			});
+			const runningEndpoint =
+				await resolvedDependencies.startFeishuEndpoint(
+					routes,
+					endpointConfig
+				);
+			runningServices.push(runningEndpoint);
+			log.info("service.feishu.started", {
 				routeCount: Object.keys(endpointConfig.chatRoutes).length,
 			});
 		}

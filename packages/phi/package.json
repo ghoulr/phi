@@ -21,6 +21,7 @@
     "dev:service:prompt": "NODE_ENV=development PHI_LOG_LEVEL=debug PHI_LOG_FORMAT=pretty bun index.ts service --print-system-prompt"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@mariozechner/pi-ai": "^0.55.4",
     "@mariozechner/pi-coding-agent": "0.55.4",
     "@sinclair/typebox": "^0.34.41",

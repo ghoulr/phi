@@ -126,7 +126,7 @@ Phi writes logs to stdio.
 - development: pretty console logs via `pino-pretty`
 - production: structured JSON logs to stdout for collectors such as `journald`
 
-Every log record includes a `tag` field such as `service`, `runtime`, `telegram`, or `cron`.
+Every log record includes a `tag` field such as `service`, `runtime`, `telegram`, `feishu`, or `cron`.
 
 Environment overrides:
 

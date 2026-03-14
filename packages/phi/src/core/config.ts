@@ -28,8 +28,16 @@ export interface TelegramSessionRouteConfig {
 	token: string;
 }
 
+export interface FeishuSessionRouteConfig {
+	enabled?: boolean;
+	id: string;
+	appId: string;
+	appSecret: string;
+}
+
 export interface PhiSessionRoutesConfig {
 	telegram?: TelegramSessionRouteConfig;
+	feishu?: FeishuSessionRouteConfig;
 }
 
 export interface PhiChatConfig {
@@ -55,6 +63,15 @@ export interface ResolvedTelegramSessionServiceConfig {
 	workspace: string;
 	telegramChatId: string;
 	token: string;
+}
+
+export interface ResolvedFeishuSessionServiceConfig {
+	sessionId: string;
+	chatId: string;
+	workspace: string;
+	feishuChatId: string;
+	appId: string;
+	appSecret: string;
 }
 
 export interface ResolvedCronSessionServiceConfig {
@@ -235,6 +252,50 @@ export function collectTelegramSessionServiceConfigs(
 			token: toNonEmptyString(
 				telegramRoute.token,
 				`Invalid telegram route for session ${sessionId}: missing token`
+			),
+		});
+	}
+
+	return entries;
+}
+
+export function collectFeishuSessionServiceConfigs(
+	phiConfig: PhiConfig
+): ResolvedFeishuSessionServiceConfig[] {
+	assertUniqueChatWorkspaces(phiConfig);
+
+	const sessions = phiConfig.sessions;
+	if (!sessions) {
+		throw new Error("Missing sessions configuration in phi config.");
+	}
+
+	const entries: ResolvedFeishuSessionServiceConfig[] = [];
+	for (const [sessionId, sessionConfig] of Object.entries(sessions)) {
+		const feishuRoute = sessionConfig.routes?.feishu;
+		if (!feishuRoute || feishuRoute.enabled === false) {
+			continue;
+		}
+
+		const resolvedSession = resolveSessionRuntimeConfigFromEntry({
+			phiConfig,
+			sessionId,
+			sessionConfig,
+		});
+		entries.push({
+			sessionId,
+			chatId: resolvedSession.chatId,
+			workspace: resolvedSession.workspace,
+			feishuChatId: toNonEmptyString(
+				feishuRoute.id,
+				`Invalid feishu route for session ${sessionId}: missing id`
+			),
+			appId: toNonEmptyString(
+				feishuRoute.appId,
+				`Invalid feishu route for session ${sessionId}: missing appId`
+			),
+			appSecret: toNonEmptyString(
+				feishuRoute.appSecret,
+				`Invalid feishu route for session ${sessionId}: missing appSecret`
 			),
 		});
 	}

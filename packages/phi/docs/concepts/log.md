@@ -29,7 +29,7 @@ appendStructuredLogEntry({ tag: "cron", event: "cron.job.failed", err });
 | `event`   | Machine-readable `tag.subj.state` | ✓     |
 | `message` | Human-readable summary         | optional |
 
-Add context fields as needed: `chatId`, `telegramChatId`, `telegramUpdateId`, `telegramMessageId`, `jobId`, `durationMs`, `err`.
+Add context fields as needed: `chatId`, `telegramChatId`, `telegramUpdateId`, `telegramMessageId`, `feishuChatId`, `feishuEventId`, `feishuMessageId`, `jobId`, `durationMs`, `err`.
 
 For audit records, add `category: "audit"`.
 

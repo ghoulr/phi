@@ -40,6 +40,15 @@ sessions:
         id: <chat-id>
         token: <telegram-token>
 
+  alice-feishu:
+    chat: user-alice
+    agent: main
+    routes:
+      feishu:
+        id: <feishu-chat-id>
+        appId: <feishu-app-id>
+        appSecret: <feishu-app-secret>
+
   alice-cron:
     chat: user-alice
     agent: main
