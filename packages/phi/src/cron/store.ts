@@ -7,11 +7,8 @@ import {
 	type PhiWorkspaceConfig,
 } from "@phi/core/workspace-config";
 import type { ChatWorkspaceLayout } from "@phi/core/chat-workspace";
+import { isRecord } from "@phi/core/type-guards";
 import type { CronRunLogEntry, LoadedCronJob } from "@phi/cron/types";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function toNonEmptyString(value: unknown, errorMessage: string): string {
 	if (typeof value !== "string" || value.trim().length === 0) {

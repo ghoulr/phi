@@ -5,6 +5,7 @@ import { parse } from "yaml";
 
 import { resolveChatWorkspaceDirectory } from "@phi/core/chat-workspace";
 import { getPhiConfigFilePath } from "@phi/core/paths";
+import { isRecord } from "@phi/core/type-guards";
 
 export type PhiThinkingLevel =
 	| "off"
@@ -75,10 +76,6 @@ const THINKING_LEVEL_SET = new Set<PhiThinkingLevel>([
 	"high",
 	"xhigh",
 ]);
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function toNonEmptyString(value: unknown, errorMessage: string): string {
 	if (typeof value !== "string" || value.length === 0) {
@@ -226,6 +223,28 @@ export function resolveCronChatServiceConfigs(
 			workspace: resolvedChat.workspace,
 		};
 	});
+}
+
+export function resolveEnabledChatRouteKeys(
+	phiConfig: PhiConfig,
+	chatId: string
+): string[] {
+	const chatConfig = phiConfig.chats?.[chatId];
+	if (!chatConfig) {
+		throw new Error(`Missing chat configuration for chat id: ${chatId}`);
+	}
+	const routes = chatConfig.routes;
+	if (!routes || !isRecord(routes)) {
+		return [];
+	}
+	return Object.entries(routes)
+		.filter(([, routeConfig]) => {
+			if (!isRecord(routeConfig)) {
+				return false;
+			}
+			return routeConfig.enabled !== false;
+		})
+		.map(([routeKey]) => routeKey);
 }
 
 export function resolveChatRuntimeConfig(

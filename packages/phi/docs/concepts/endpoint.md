@@ -1,32 +1,33 @@
 # Endpoint
 
-An endpoint is a messaging surface that connects phi to an external platform (Telegram, Feishu, Discord, etc).
+An endpoint is a messaging transport that connects phi to an external platform such as Telegram or Feishu.
 
-Endpoints plug into the existing route model:
-
-phi intentionally keeps endpoints thin.
-Complexity belongs in the agent, not the transport.
+Keep endpoints thin.
+Routing, session state, and agent execution belong elsewhere.
 
 ```text
-Endpoint Provider  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Platform  ◄────►  Endpoint provider  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
 ```
 
-## What it is
+## Scope
 
-An `EndpointProvider` is a self-contained adapter that owns:
-- Connection lifecycle (polling, websocket, webhook)
-- Inbound message parsing (platform format → unified context)
-- Outbound message delivery (unified message → platform API)
+This document is about **message endpoints**.
 
-It does not own routing, session management, or agent execution.
-Those belong to Routes and Chat handlers.
+`EndpointProvider` is for transports that both receive and/or send messages.
+It is not the abstraction for every runtime source.
+For example, cron is a source runtime wired through Routes, not an `EndpointProvider`.
 
-## Interface
+## Provider contract
+
+An `EndpointProvider` owns only:
+- connection lifecycle
+- inbound parsing
+- outbound formatting and delivery
 
 ```typescript
 interface EndpointProvider {
-  readonly id: string;        // "telegram" | "feishu" | ...
-  readonly instanceId: string; // stable, non-sensitive identifier
+  readonly id: string;         // endpoint type: "telegram" | "feishu" | ...
+  readonly instanceId: string; // stable, non-sensitive, credential-scoped id
 
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -34,34 +35,32 @@ interface EndpointProvider {
 }
 ```
 
-Providers use a factory pattern with lifecycle separation:
+Providers use a factory pattern:
 
 ```typescript
-// 1. Create (synchronous, does not connect)
-const provider = TelegramProvider.create({
-  token,
+const provider = FeishuProvider.create({
+  appId,
+  appSecret,
   callbacks,
   onMessage,
 });
 
-// 2. Register routes using provider.instanceId
 routes.registerInteractiveRoute(provider.instanceId, routeId, chatId);
 
-// 3. Start connection
 await provider.start();
 ```
 
-This separation allows routes to be registered before messages arrive,
-avoiding race conditions where early messages are lost.
+Create first, register routes, then start.
+This avoids losing early inbound messages.
 
-### Inbound context
+## Address model
 
 ```typescript
 interface EndpointInboundContext {
-  endpointId: string;          // provider id ("telegram")
-  instanceId: string;          // stable instance identifier
-  routeId: string;             // platform-specific chat/user id
-  messageId: string;           // platform message id
+  endpointId: string;
+  instanceId: string;
+  routeId: string;
+  messageId: string;
   text?: string;
   attachments: EndpointAttachment[];
   metadata?: Record<string, unknown>;
@@ -70,7 +69,11 @@ interface EndpointInboundContext {
 }
 ```
 
-### Outbound message
+- `id` is the endpoint type.
+- `instanceId` is the concrete provider instance. Routes bind against `instanceId`, not endpoint type.
+- `routeId` is the platform address used for both inbound and outbound.
+- `routeId` must be stable and directly sendable. Example: Telegram chat id, Feishu `chat_id`.
+- interactive inbound turns should use one stable outbound destination derived from the source route.
 
 ```typescript
 interface EndpointOutboundMessage {
@@ -80,42 +83,10 @@ interface EndpointOutboundMessage {
 }
 ```
 
-## Architecture
-
-```text
-┌─────────────────────────────────────────────────────┐
-│                    ServiceRoutes                    │
-│  registerInteractiveRoute / registerOutboundRoute   │
-└───────────┬────────────────────────────┬────────────┘
-            │                            │
-   ┌────────▼────────┐          ┌────────▼────────┐
-   │TelegramProvider │          │ FeishuProvider  │
-   │  (grammy)       │          │  (lark SDK)     │
-   └─────────────────┘          └─────────────────┘
-```
-
-- `ServiceRoutes` stays endpoint-agnostic
-- Each provider owns its SDK, connection, and message translation
-- `ChatHandler` / `PiChatHandler` are unchanged
-
-## Shared utilities
-
-Providers share common patterns but not a framework:
-
-| Utility | Purpose |
-|---------|---------|
-| `chunkAndSend(text, limit, send)` | Split long messages |
-| `saveInboundAttachment(data, meta)` | Persist media to inbox |
-| `createIdempotencyKey(endpoint, ...parts)` | Dedup keys |
-| `sanitizeOutboundText(text)` | Clean markdown/HTML |
-
-These live in `services/endpoints/shared.ts` as plain functions.
-Providers import what they need.
-
 ## Config discovery
 
-Providers are **not** configured in a separate `endpoints` section.
-They are discovered from the existing chat config:
+Endpoints are discovered from `chats.*.routes`.
+There is no separate top-level `endpoints` section.
 
 ```yaml
 chats:
@@ -126,28 +97,47 @@ chats:
       telegram:
         id: 123456
         token: "xxx"
+
   bob:
     workspace: ~/phi/workspaces/bob
-    agent: claude
+    agent: support
     routes:
-      telegram:
-        id: 789012
-        token: "xxx"  # same bot, different chat
+      feishu:
+        id: oc_xxx
+        appId: cli_xxx
+        appSecret: xxx
 ```
 
-The service startup:
-1. Scans `chats.*.routes` to find which endpoints are in use
-2. Groups routes by endpoint type and credential
-3. Creates one provider instance per unique credential set
-4. Wires provider inbound to routes, routes outbound to provider
+Service startup:
+1. scan `chats.*.routes`
+2. group routes by endpoint type and credentials
+3. create one provider instance per group
+4. register all routes with `provider.instanceId`
+5. start providers
 
-This keeps chat as the first-class concept. Endpoints are just how chats connect.
+A provider owns a route table.
+Chats declare routes, but do not create provider instances directly.
 
-## Adding a new endpoint
+## Shared utilities
 
-1. Create `services/endpoints/<name>-provider.ts`
-2. Implement `EndpointProvider` with `static create(options)` factory
-3. Add route config type to `core/config.ts`
-4. Register provider creation in `commands/service.ts`
+Shared helpers stay as plain functions in `services/endpoints/shared.ts`.
+Examples:
+- text chunking
+- attachment persistence
+- idempotency key creation
+- outbound text sanitization
 
-No changes to Routes, ChatHandler, or existing providers.
+No provider framework.
+Reuse helpers only when they stay generic.
+
+## Adding an endpoint
+
+1. add `services/endpoints/<name>-provider.ts`
+2. implement `EndpointProvider` with `static create(options)`
+3. add route config types in `core/config.ts`
+4. add config collection and provider grouping in service startup
+5. wire inbound/outbound through `ServiceRoutes`
+6. add tests for config, startup grouping, and provider behavior
+7. update example config and docs
+
+No changes should be needed in `Routes` or `ChatHandler` for a normal messaging endpoint.

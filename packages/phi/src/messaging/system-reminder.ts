@@ -1,10 +1,8 @@
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 
-const TEXT_BLOCK_KEYS = new Set(["text", "caption", "body"]);
+import { isRecord } from "@phi/core/type-guards";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
-}
+const TEXT_BLOCK_KEYS = new Set(["text", "caption", "body"]);
 
 function cleanReminderMetadata(value: unknown): unknown {
 	if (value === null || value === undefined) {

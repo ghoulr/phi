@@ -1,4 +1,3 @@
-import { getPhiLogger } from "@phi/core/logger";
 import type { PhiMessage } from "@phi/messaging/types";
 import type { ChatHandler } from "@phi/services/chat-handler";
 
@@ -11,19 +10,19 @@ export interface ChatHandlerInteractiveAttachment {
 export interface ChatHandlerInteractiveInput {
 	text?: string;
 	attachments: ChatHandlerInteractiveAttachment[];
+	outboundDestination: string;
 	metadata?: Record<string, unknown>;
 	sendTyping(): Promise<unknown>;
 }
 
 export interface ChatHandlerCronInput {
 	text: string;
+	outboundDestination: string;
 }
 
 export interface ChatDeliveryRoute {
 	deliver(message: PhiMessage): Promise<void>;
 }
-
-const log = getPhiLogger("routes");
 
 function createInteractiveRouteKey(
 	endpointId: string,
@@ -35,7 +34,10 @@ function createInteractiveRouteKey(
 export class ServiceRoutes {
 	private readonly chatHandlers = new Map<string, ChatHandler>();
 	private readonly interactiveRoutes = new Map<string, string>();
-	private readonly outboundRoutes = new Map<string, Set<ChatDeliveryRoute>>();
+	private readonly outboundRoutes = new Map<
+		string,
+		Map<string, ChatDeliveryRoute>
+	>();
 
 	public registerChatHandler(
 		chatId: string,
@@ -75,19 +77,29 @@ export class ServiceRoutes {
 
 	public registerOutboundRoute(
 		chatId: string,
+		outboundDestination: string,
 		delivery: ChatDeliveryRoute
 	): () => void {
-		const deliveries =
-			this.outboundRoutes.get(chatId) ?? new Set<ChatDeliveryRoute>();
-		deliveries.add(delivery);
-		this.outboundRoutes.set(chatId, deliveries);
+		const destinations =
+			this.outboundRoutes.get(chatId) ??
+			new Map<string, ChatDeliveryRoute>();
+		const existingDelivery = destinations.get(outboundDestination);
+		if (existingDelivery) {
+			throw new Error(
+				`Duplicate outbound route for chat ${chatId} and destination ${outboundDestination}`
+			);
+		}
+		destinations.set(outboundDestination, delivery);
+		this.outboundRoutes.set(chatId, destinations);
 		return () => {
-			const currentDeliveries = this.outboundRoutes.get(chatId);
-			if (!currentDeliveries) {
+			const currentDestinations = this.outboundRoutes.get(chatId);
+			if (!currentDestinations) {
 				return;
 			}
-			currentDeliveries.delete(delivery);
-			if (currentDeliveries.size === 0) {
+			if (currentDestinations.get(outboundDestination) === delivery) {
+				currentDestinations.delete(outboundDestination);
+			}
+			if (currentDestinations.size === 0) {
 				this.outboundRoutes.delete(chatId);
 			}
 		};
@@ -118,40 +130,18 @@ export class ServiceRoutes {
 
 	public async deliverOutbound(
 		chatId: string,
-		message: PhiMessage
+		message: PhiMessage,
+		outboundDestination: string
 	): Promise<void> {
-		const deliveries = Array.from(this.outboundRoutes.get(chatId) ?? []);
-		const results = await Promise.all(
-			deliveries.map(async (delivery, index) => {
-				try {
-					await delivery.deliver(message);
-					return { ok: true, index } as const;
-				} catch (error: unknown) {
-					return { ok: false, error, index } as const;
-				}
-			})
-		);
-		const failedResults = results.filter(
-			(result): result is { ok: false; error: unknown; index: number } =>
-				result.ok === false
-		);
-		if (failedResults.length === 0) {
-			return;
-		}
-		if (failedResults.length === deliveries.length) {
-			throw new AggregateError(
-				failedResults.map((result) => result.error),
-				`All outbound routes failed for chat ${chatId}`
+		const delivery = this.outboundRoutes
+			.get(chatId)
+			?.get(outboundDestination);
+		if (!delivery) {
+			throw new Error(
+				`No outbound route configured for chat ${chatId} and destination ${outboundDestination}`
 			);
 		}
-		log.warn("routes.delivery.partial_failed", {
-			chatId,
-			deliveryCount: deliveries.length,
-			failedDeliveryCount: failedResults.length,
-			failedDeliveryIndexes: failedResults.map((result) => result.index),
-			textLength: message.text?.length,
-			attachmentCount: message.attachments.length,
-		});
+		await delivery.deliver(message);
 	}
 
 	private requireChatHandler(chatId: string): ChatHandler {

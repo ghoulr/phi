@@ -41,61 +41,39 @@ function extractReminderText(text: string): string | undefined {
 	return reminderText || undefined;
 }
 
-function extractCurrentMessageFromBlock(
-	reminderText: string
+function extractIndentedBlock(
+	text: string,
+	marker: string,
+	indent: string
 ): string | undefined {
-	const marker = "current_message:\n";
-	const startIndex = reminderText.indexOf(marker);
+	const startIndex = text.indexOf(marker);
 	if (startIndex === -1) {
 		return undefined;
 	}
-	const lines = reminderText.slice(startIndex + marker.length).split("\n");
-	const currentMessageLines: string[] = [];
+	const lines = text.slice(startIndex + marker.length).split("\n");
+	const blockLines: string[] = [];
 	for (const line of lines) {
-		if (!line.startsWith("  ")) {
+		if (!line.startsWith(indent)) {
 			break;
 		}
-		currentMessageLines.push(line);
+		blockLines.push(line);
 	}
-	if (currentMessageLines.length === 0) {
+	if (blockLines.length === 0) {
 		return undefined;
 	}
-	return currentMessageLines.join("\n");
+	return blockLines.join("\n");
 }
 
-function extractSenderBlock(currentMessageBlock: string): string | undefined {
-	const marker = "  from:\n";
-	const startIndex = currentMessageBlock.indexOf(marker);
-	if (startIndex === -1) {
-		return undefined;
-	}
-	const lines = currentMessageBlock
-		.slice(startIndex + marker.length)
-		.split("\n");
-	const senderLines: string[] = [];
-	for (const line of lines) {
-		if (!line.startsWith("    ")) {
-			break;
-		}
-		senderLines.push(line);
-	}
-	if (senderLines.length === 0) {
-		return undefined;
-	}
-	return senderLines.join("\n");
-}
-
-function matchSenderValue(
-	senderBlock: string,
-	key: "id" | "username" | "first_name" | "last_name"
-): string | undefined {
-	const match = senderBlock.match(new RegExp(`^    ${key}: (.+)$`, "m"));
+function matchValue(block: string, pattern: string): string | undefined {
+	const match = block.match(new RegExp(pattern, "m"));
 	return match?.[1]?.trim();
 }
 
-export function resolveSenderMentionFromCurrentTurn(
-	ctx: ExtensionContext
-): PhiMessageMention | undefined {
+function resolveCurrentTurnReminderBlock(
+	ctx: ExtensionContext,
+	marker: string,
+	indent: string
+): string | undefined {
 	const userText = extractLatestUserText(ctx);
 	if (!userText) {
 		return undefined;
@@ -104,26 +82,50 @@ export function resolveSenderMentionFromCurrentTurn(
 	if (!reminderText) {
 		return undefined;
 	}
-	const currentMessageBlock = extractCurrentMessageFromBlock(reminderText);
+	return extractIndentedBlock(reminderText, marker, indent);
+}
+
+export function resolveOutboundDestinationFromCurrentTurn(
+	ctx: ExtensionContext
+): string | undefined {
+	const phiBlock = resolveCurrentTurnReminderBlock(ctx, "phi:\n", "  ");
+	if (!phiBlock) {
+		return undefined;
+	}
+	return matchValue(phiBlock, "^  outboundDestination: (.+)$");
+}
+
+export function resolveSenderMentionFromCurrentTurn(
+	ctx: ExtensionContext
+): PhiMessageMention | undefined {
+	const currentMessageBlock = resolveCurrentTurnReminderBlock(
+		ctx,
+		"current_message:\n",
+		"  "
+	);
 	if (!currentMessageBlock) {
 		return undefined;
 	}
-	const senderBlock = extractSenderBlock(currentMessageBlock);
+	const senderBlock = extractIndentedBlock(
+		currentMessageBlock,
+		"  from:\n",
+		"    "
+	);
 	if (!senderBlock) {
 		return undefined;
 	}
-	const userId = matchSenderValue(senderBlock, "id");
+	const userId = matchValue(senderBlock, "^    id: (.+)$");
 	if (!userId) {
 		return undefined;
 	}
-	const firstName = matchSenderValue(senderBlock, "first_name");
-	const lastName = matchSenderValue(senderBlock, "last_name");
+	const firstName = matchValue(senderBlock, "^    first_name: (.+)$");
+	const lastName = matchValue(senderBlock, "^    last_name: (.+)$");
 	const displayName = [firstName, lastName]
 		.filter((part): part is string => Boolean(part))
 		.join(" ");
 	return {
 		userId,
-		username: matchSenderValue(senderBlock, "username"),
+		username: matchValue(senderBlock, "^    username: (.+)$"),
 		displayName: displayName || undefined,
 	};
 }

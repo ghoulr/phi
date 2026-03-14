@@ -6,6 +6,7 @@ import workspaceConfigTemplateText from "@phi/templates/workspace-config.templat
 	type: "text",
 };
 import type { CronJobDefinition } from "@phi/cron/types";
+import { isRecord } from "@phi/core/type-guards";
 
 export interface PhiWorkspaceChatConfig {
 	timezone?: string;
@@ -13,6 +14,7 @@ export interface PhiWorkspaceChatConfig {
 
 export interface PhiWorkspaceCronConfig {
 	enabled?: boolean;
+	destination?: string;
 	jobs?: CronJobDefinition[];
 }
 
@@ -46,10 +48,6 @@ export function renderPhiWorkspaceConfigTemplate(): string {
 	);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function requireOptionalRecord(
 	value: unknown,
 	path: string,
@@ -64,6 +62,22 @@ function requireOptionalRecord(
 		);
 	}
 	return value;
+}
+
+function resolveOptionalNonEmptyString(
+	value: unknown,
+	path: string,
+	configFilePath: string
+): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new Error(
+			`Invalid workspace config: ${path} must be a non-empty string (${configFilePath})`
+		);
+	}
+	return value.trim();
 }
 
 export function loadPhiWorkspaceConfig(
@@ -94,16 +108,26 @@ export function resolveWorkspaceTimezone(
 	workspaceConfig: PhiWorkspaceConfig,
 	configFilePath: string
 ): string | undefined {
-	const timezone = workspaceConfig.chat?.timezone;
-	if (timezone === undefined) {
+	return resolveOptionalNonEmptyString(
+		workspaceConfig.chat?.timezone,
+		"chat.timezone",
+		configFilePath
+	);
+}
+
+export function resolveWorkspaceCronDestination(
+	workspaceConfig: PhiWorkspaceConfig,
+	configFilePath: string
+): string | undefined {
+	const cronConfig = workspaceConfig.cron;
+	if (!cronConfig || cronConfig.enabled === false) {
 		return undefined;
 	}
-	if (typeof timezone !== "string" || timezone.trim().length === 0) {
-		throw new Error(
-			`Invalid workspace config: chat.timezone must be a non-empty string (${configFilePath})`
-		);
-	}
-	return timezone.trim();
+	return resolveOptionalNonEmptyString(
+		cronConfig.destination,
+		"cron.destination",
+		configFilePath
+	);
 }
 
 export function resolveWorkspaceCronJobDefinitions(

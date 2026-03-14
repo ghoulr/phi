@@ -36,6 +36,7 @@ describe("service routes", () => {
 		await routes.dispatchInteractive("telegram:bot-1", "42", {
 			text: "hello",
 			attachments: [],
+			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 
@@ -43,6 +44,7 @@ describe("service routes", () => {
 			{
 				text: "hello",
 				attachments: [],
+				outboundDestination: "telegram",
 				sendTyping: expect.any(Function),
 			},
 		]);
@@ -60,78 +62,82 @@ describe("service routes", () => {
 		);
 
 		expect(
-			await routes.dispatchCron("alice", { text: "cron prompt" })
+			await routes.dispatchCron("alice", {
+				text: "cron prompt",
+				outboundDestination: "telegram",
+			})
 		).toEqual([{ text: "cron prompt", attachments: [] }]);
 	});
 
-	it("delivers outbound messages to every configured sink", async () => {
+	it("delivers outbound messages to the requested destination", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "telegram", {
 			async deliver(message): Promise<void> {
-				delivered.push(`one:${message.text}`);
+				delivered.push(`telegram:${message.text}`);
 			},
 		});
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "feishu", {
 			async deliver(message): Promise<void> {
-				delivered.push(`two:${message.text}`);
+				delivered.push(`feishu:${message.text}`);
 			},
 		});
 
-		await routes.deliverOutbound("alice", {
-			text: "done",
-			attachments: [],
-		});
-
-		expect(delivered.sort()).toEqual(["one:done", "two:done"]);
-	});
-
-	it("keeps successful sinks committed when one outbound sink fails", async () => {
-		const routes = new ServiceRoutes();
-		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
-			async deliver(message): Promise<void> {
-				delivered.push(`one:${message.text}`);
-			},
-		});
-		routes.registerOutboundRoute("alice", {
-			async deliver(): Promise<void> {
-				throw new Error("sink failed");
-			},
-		});
-
-		await expect(
-			routes.deliverOutbound("alice", {
+		await routes.deliverOutbound(
+			"alice",
+			{
 				text: "done",
 				attachments: [],
+			},
+			"telegram"
+		);
+
+		expect(delivered).toEqual(["telegram:done"]);
+	});
+
+	it("fails when the requested destination does not exist", async () => {
+		const routes = new ServiceRoutes();
+		routes.registerOutboundRoute("alice", "telegram", {
+			async deliver(): Promise<void> {},
+		});
+
+		await expect(
+			routes.deliverOutbound(
+				"alice",
+				{ text: "done", attachments: [] },
+				"feishu"
+			)
+		).rejects.toThrow(
+			"No outbound route configured for chat alice and destination feishu"
+		);
+	});
+
+	it("fails fast when duplicate outbound destination is registered", () => {
+		const routes = new ServiceRoutes();
+		routes.registerOutboundRoute("alice", "telegram", {
+			async deliver(): Promise<void> {},
+		});
+
+		expect(() =>
+			routes.registerOutboundRoute("alice", "telegram", {
+				async deliver(): Promise<void> {},
 			})
-		).resolves.toBeUndefined();
-		expect(delivered).toEqual(["one:done"]);
+		).toThrow(
+			"Duplicate outbound route for chat alice and destination telegram"
+		);
 	});
 
-	it("fails when every outbound sink fails", async () => {
+	it("fails fast when the same outbound delivery is registered twice", () => {
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("alice", {
-			async deliver(): Promise<void> {
-				throw new Error("sink one failed");
-			},
-		});
-		routes.registerOutboundRoute("alice", {
-			async deliver(): Promise<void> {
-				throw new Error("sink two failed");
-			},
-		});
+		const delivery = {
+			async deliver(): Promise<void> {},
+		};
+		routes.registerOutboundRoute("alice", "telegram", delivery);
 
-		await expect(
-			routes.deliverOutbound("alice", { text: "done", attachments: [] })
-		).rejects.toThrow("All outbound routes failed for chat alice");
-	});
-
-	it("allows chats without outbound sinks", async () => {
-		const routes = new ServiceRoutes();
-
-		await expect(
-			routes.deliverOutbound("alice", { text: "done", attachments: [] })
-		).resolves.toBeUndefined();
+		expect(() =>
+			routes.registerOutboundRoute("alice", "telegram", delivery)
+		).toThrow(
+			"Duplicate outbound route for chat alice and destination telegram"
+		);
 	});
 });

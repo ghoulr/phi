@@ -1,7 +1,8 @@
 import { getPhiLogger } from "@phi/core/logger";
-import type {
-	PhiConfig,
-	ResolvedCronChatServiceConfig,
+import {
+	resolveEnabledChatRouteKeys,
+	type PhiConfig,
+	type ResolvedCronChatServiceConfig,
 } from "@phi/core/config";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import {
@@ -10,6 +11,7 @@ import {
 } from "@phi/core/chat-workspace";
 import {
 	loadPhiWorkspaceConfig,
+	resolveWorkspaceCronDestination,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
 import { computeCronJobNextRunAtMs } from "@phi/cron/schedule";
@@ -47,13 +49,32 @@ function buildCronLogText(outboundMessages: PhiMessage[]): string {
 		.trim();
 }
 
+function assertCronDestinationConfigured(params: {
+	phiConfig: PhiConfig;
+	chatId: string;
+	outboundDestination: string;
+}): void {
+	const routeKeys = resolveEnabledChatRouteKeys(
+		params.phiConfig,
+		params.chatId
+	);
+	if (routeKeys.includes(params.outboundDestination)) {
+		return;
+	}
+	throw new Error(
+		`Invalid cron.destination for chat ${params.chatId}: ${params.outboundDestination}`
+	);
+}
+
 class ChatCronScheduler {
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private jobs: LoadedCronJob[] = [];
 	private timezone: string | undefined;
+	private outboundDestination: string | undefined;
 	private readonly runningJobs = new Set<string>();
 
 	public constructor(
+		private readonly phiConfig: PhiConfig,
 		private readonly chatConfig: ResolvedCronChatServiceConfig,
 		private readonly dependencies: CronServiceDependencies
 	) {}
@@ -88,6 +109,7 @@ class ChatCronScheduler {
 		const previousJobs = this.jobs;
 		const previousTimer = this.timer;
 		const previousTimezone = this.timezone;
+		const previousOutboundDestination = this.outboundDestination;
 		log.debug("cron.scheduler.reload_started", {
 			chatId: this.chatConfig.chatId,
 		});
@@ -95,6 +117,7 @@ class ChatCronScheduler {
 		try {
 			const state = this.loadValidatedState();
 			this.timezone = state.timezone;
+			this.outboundDestination = state.outboundDestination;
 			this.jobs = state.jobs;
 			if (previousTimer) {
 				clearTimeout(previousTimer);
@@ -113,6 +136,7 @@ class ChatCronScheduler {
 			this.jobs = previousJobs;
 			this.timer = previousTimer;
 			this.timezone = previousTimezone;
+			this.outboundDestination = previousOutboundDestination;
 			log.error("cron.scheduler.reload_failed", {
 				chatId: this.chatConfig.chatId,
 				err: error instanceof Error ? error : new Error(String(error)),
@@ -123,6 +147,7 @@ class ChatCronScheduler {
 
 	private loadValidatedState(): {
 		timezone: string | undefined;
+		outboundDestination: string | undefined;
 		jobs: LoadedCronJob[];
 	} {
 		const workspaceDir = resolveChatWorkspaceDirectory(
@@ -131,6 +156,10 @@ class ChatCronScheduler {
 		const layout = ensureChatWorkspaceLayout(workspaceDir);
 		const workspaceConfig = loadPhiWorkspaceConfig(layout.configFilePath);
 		const timezone = resolveWorkspaceTimezone(
+			workspaceConfig,
+			layout.configFilePath
+		);
+		const outboundDestination = resolveWorkspaceCronDestination(
 			workspaceConfig,
 			layout.configFilePath
 		);
@@ -143,11 +172,24 @@ class ChatCronScheduler {
 				`Missing chat.timezone for cron chat ${this.chatConfig.chatId}`
 			);
 		}
+		if (loadedJobs.length > 0 && !outboundDestination) {
+			throw new Error(
+				`Missing cron.destination for chat ${this.chatConfig.chatId}`
+			);
+		}
+		if (outboundDestination) {
+			assertCronDestinationConfigured({
+				phiConfig: this.phiConfig,
+				chatId: this.chatConfig.chatId,
+				outboundDestination,
+			});
+		}
 		return {
 			timezone,
+			outboundDestination,
 			jobs: loadedJobs.map((job) => ({
 				...job,
-				nextRunAtMs: this.computeNextRunAtMs(job),
+				nextRunAtMs: this.computeNextRunAtMs(job, timezone),
 			})),
 		};
 	}
@@ -172,8 +214,15 @@ class ChatCronScheduler {
 		return this.timezone;
 	}
 
-	private computeNextRunAtMs(job: LoadedCronJob): number | undefined {
-		return computeCronJobNextRunAtMs(job, this.getTimezone(), Date.now());
+	private computeNextRunAtMs(
+		job: LoadedCronJob,
+		timezone: string | undefined = this.timezone
+	): number | undefined {
+		return computeCronJobNextRunAtMs(
+			job,
+			timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+			Date.now()
+		);
 	}
 
 	private armTimer(): void {
@@ -227,6 +276,12 @@ class ChatCronScheduler {
 	}
 
 	private async runJob(job: LoadedCronJob): Promise<void> {
+		const outboundDestination = this.outboundDestination;
+		if (!outboundDestination) {
+			throw new Error(
+				`Missing cron.destination for chat ${this.chatConfig.chatId}`
+			);
+		}
 		const startedAtDate = new Date();
 		const startedAt = startedAtDate.toISOString();
 		const startedAtMs = startedAtDate.getTime();
@@ -239,7 +294,7 @@ class ChatCronScheduler {
 		try {
 			const outboundMessages = await this.dependencies.dispatchTrigger(
 				this.chatConfig.chatId,
-				{ text: job.promptText }
+				{ text: job.promptText, outboundDestination }
 			);
 			appendCronRunLog({
 				chatId: this.chatConfig.chatId,
@@ -303,7 +358,11 @@ export async function startCronService(params: {
 	});
 
 	for (const chatConfig of params.chatConfigs) {
-		const scheduler = new ChatCronScheduler(chatConfig, dependencies);
+		const scheduler = new ChatCronScheduler(
+			params.phiConfig,
+			chatConfig,
+			dependencies
+		);
 		await scheduler.start();
 		schedulers.set(chatConfig.chatId, scheduler);
 		unregisterHandlers.push(

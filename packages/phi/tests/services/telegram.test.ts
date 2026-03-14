@@ -294,6 +294,7 @@ describe("telegram service", () => {
 
 		expect(submissions.length).toBe(1);
 		expect(submissions[0]?.text).toBe("hello");
+		expect(submissions[0]?.outboundDestination).toBe("telegram");
 		expect(bot.startCalls).toBe(1);
 	});
 
@@ -306,10 +307,14 @@ describe("telegram service", () => {
 			"user-alice",
 			createChatHandler({
 				async submitInteractive(): Promise<void> {
-					await routes.deliverOutbound("user-alice", {
-						text: "assistant reply",
-						attachments: [],
-					});
+					await routes.deliverOutbound(
+						"user-alice",
+						{
+							text: "assistant reply",
+							attachments: [],
+						},
+						"telegram"
+					);
 				},
 			})
 		);
@@ -344,10 +349,14 @@ describe("telegram service", () => {
 			"user-alice",
 			createChatHandler({
 				async submitInteractive(): Promise<void> {
-					await routes.deliverOutbound("user-alice", {
-						text: "assistant reply",
-						attachments: [],
-					});
+					await routes.deliverOutbound(
+						"user-alice",
+						{
+							text: "assistant reply",
+							attachments: [],
+						},
+						"telegram"
+					);
 				},
 			})
 		);
@@ -389,10 +398,14 @@ describe("telegram service", () => {
 			"user-alice",
 			createChatHandler({
 				async submitInteractive(): Promise<void> {
-					await routes.deliverOutbound("user-alice", {
-						text: longText,
-						attachments: [],
-					});
+					await routes.deliverOutbound(
+						"user-alice",
+						{
+							text: longText,
+							attachments: [],
+						},
+						"telegram"
+					);
 				},
 			})
 		);
@@ -506,10 +519,14 @@ describe("telegram service", () => {
 			"user-alice",
 			createChatHandler({
 				async submitInteractive(): Promise<void> {
-					await routes.deliverOutbound("user-alice", {
-						text: "a".repeat(2000),
-						attachments: [{ path: filePath, name: "test.pdf" }],
-					});
+					await routes.deliverOutbound(
+						"user-alice",
+						{
+							text: "a".repeat(2000),
+							attachments: [{ path: filePath, name: "test.pdf" }],
+						},
+						"telegram"
+					);
 				},
 			})
 		);

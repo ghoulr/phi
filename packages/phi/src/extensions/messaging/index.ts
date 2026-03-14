@@ -13,7 +13,10 @@ import { getPhiLogger } from "@phi/core/logger";
 import { normalizeUnknownError } from "@phi/core/user-error";
 import { labelInlineExtensionFactory } from "@phi/core/inline-extension-labels";
 import { resolvePhiMessagingOutput } from "@phi/extensions/messaging/resolve-output";
-import { resolveSenderMentionFromCurrentTurn } from "@phi/extensions/messaging/sender";
+import {
+	resolveOutboundDestinationFromCurrentTurn,
+	resolveSenderMentionFromCurrentTurn,
+} from "@phi/extensions/messaging/sender";
 import {
 	isNoReplyToken,
 	NO_REPLY_TOKEN,
@@ -63,12 +66,14 @@ type SendInput = Static<typeof SendSchema>;
 interface MessagingRunState {
 	deferredMessage?: PhiMessage;
 	sender?: PhiMessageMention;
+	outboundDestination?: string;
 }
 
 export interface CreatePhiMessagingExtensionDependencies {
 	deliverMessage(
 		message: PhiMessage,
-		phase: "instant" | "final"
+		phase: "instant" | "final",
+		outboundDestination?: string
 	): Promise<void>;
 }
 
@@ -145,11 +150,13 @@ function stageDeferredMessage(
 function createDeliveryFields(
 	message: PhiMessage,
 	phase: "instant" | "final",
-	source: AssistantVisibleOutputSource
+	source: AssistantVisibleOutputSource,
+	outboundDestination?: string
 ): Record<string, number | string | boolean | undefined> {
 	return {
 		phase,
 		source,
+		outboundDestination,
 		hasText: typeof message.text === "string",
 		textLength: message.text?.length,
 		attachmentCount: message.attachments.length,
@@ -161,12 +168,18 @@ async function deliverMessageWithLogging(
 	dependencies: CreatePhiMessagingExtensionDependencies,
 	message: PhiMessage,
 	phase: "instant" | "final",
-	source: AssistantVisibleOutputSource
+	source: AssistantVisibleOutputSource,
+	outboundDestination?: string
 ): Promise<void> {
-	const fields = createDeliveryFields(message, phase, source);
+	const fields = createDeliveryFields(
+		message,
+		phase,
+		source,
+		outboundDestination
+	);
 	log.info("messaging.outbound.delivering", fields);
 	try {
-		await dependencies.deliverMessage(message, phase);
+		await dependencies.deliverMessage(message, phase, outboundDestination);
 		log.info("messaging.outbound.delivered", fields);
 	} catch (error: unknown) {
 		log.error("messaging.outbound.failed", {
@@ -200,7 +213,8 @@ async function executeSendTool(
 			dependencies,
 			message,
 			"instant",
-			"assistant"
+			"assistant",
+			run.outboundDestination
 		);
 		return {
 			result: {
@@ -240,6 +254,8 @@ export function createPhiMessagingExtension(
 		pi.on("agent_start", async (_event, ctx) => {
 			currentRun = {
 				sender: resolveSenderMentionFromCurrentTurn(ctx),
+				outboundDestination:
+					resolveOutboundDestinationFromCurrentTurn(ctx),
 			};
 		});
 
@@ -264,7 +280,8 @@ export function createPhiMessagingExtension(
 					dependencies,
 					message,
 					"final",
-					assistantOutput?.source ?? "assistant"
+					assistantOutput?.source ?? "assistant",
+					run?.outboundDestination
 				);
 			}
 		});

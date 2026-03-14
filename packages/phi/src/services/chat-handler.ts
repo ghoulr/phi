@@ -17,6 +17,7 @@ import type { PhiConfig } from "@phi/core/config";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import { getPhiLogger } from "@phi/core/logger";
 import { sanitizeInboundText } from "@phi/core/message-text";
+import { isRecord } from "@phi/core/type-guards";
 import {
 	createPhiAgentSession,
 	type ChatSessionRuntime,
@@ -205,10 +206,25 @@ function createImageContent(
 	};
 }
 
+function buildInteractiveMetadata(
+	input: ChatHandlerInteractiveInput
+): Record<string, unknown> {
+	const existingPhiMetadata = isRecord(input.metadata?.phi)
+		? input.metadata.phi
+		: {};
+	return {
+		...(input.metadata ?? {}),
+		phi: {
+			...existingPhiMetadata,
+			outboundDestination: input.outboundDestination,
+		},
+	};
+}
+
 function buildInteractiveAgentContent(
 	input: ChatHandlerInteractiveInput
 ): string | (TextContent | ImageContent)[] {
-	const reminder = buildPhiSystemReminder(input.metadata);
+	const reminder = buildPhiSystemReminder(buildInteractiveMetadata(input));
 	if (input.attachments.length === 0) {
 		const normalizedText = input.text?.trim();
 		if (!normalizedText) {
@@ -426,8 +442,17 @@ function createInteractiveMessagingExtensionFactories(
 ): ExtensionFactory[] {
 	return [
 		createPhiMessagingExtension({
-			deliverMessage: async (message) => {
-				await routes.deliverOutbound(chatId, message);
+			deliverMessage: async (message, _phase, outboundDestination) => {
+				if (!outboundDestination) {
+					throw new Error(
+						`Missing outbound destination for interactive chat ${chatId}`
+					);
+				}
+				await routes.deliverOutbound(
+					chatId,
+					message,
+					outboundDestination
+				);
 			},
 		}),
 	];
@@ -435,6 +460,7 @@ function createInteractiveMessagingExtensionFactories(
 
 function createCronMessagingExtensionFactories(params: {
 	chatId: string;
+	outboundDestination: string;
 	routes: ServiceRoutes;
 	outboundMessages: PhiMessage[];
 }): ExtensionFactory[] {
@@ -442,7 +468,11 @@ function createCronMessagingExtensionFactories(params: {
 		createPhiMessagingExtension({
 			deliverMessage: async (message, phase) => {
 				if (phase === "instant") {
-					await params.routes.deliverOutbound(params.chatId, message);
+					await params.routes.deliverOutbound(
+						params.chatId,
+						message,
+						params.outboundDestination
+					);
 					return;
 				}
 				params.outboundMessages.push(message);
@@ -524,6 +554,7 @@ export class PiChatHandler implements ChatHandler {
 				sessionManager: SessionManager.inMemory(),
 				extensionFactories: createCronMessagingExtensionFactories({
 					chatId: this.params.chatId,
+					outboundDestination: input.outboundDestination,
 					routes: this.params.routes,
 					outboundMessages,
 				}),
@@ -532,11 +563,16 @@ export class PiChatHandler implements ChatHandler {
 
 		try {
 			await session.sendUserMessage(buildCronAgentContent(input));
-			await this.publishCronResult(session, outboundMessages);
+			await this.publishCronResult(
+				session,
+				outboundMessages,
+				input.outboundDestination
+			);
 			return outboundMessages;
 		} catch (error: unknown) {
 			await this.publishCronError(
-				error instanceof Error ? error.message : String(error)
+				error instanceof Error ? error.message : String(error),
+				input.outboundDestination
 			);
 			throw error;
 		} finally {
@@ -569,7 +605,8 @@ export class PiChatHandler implements ChatHandler {
 
 	private async publishCronResult(
 		session: AgentSession,
-		outboundMessages: PhiMessage[]
+		outboundMessages: PhiMessage[],
+		outboundDestination: string
 	): Promise<void> {
 		const assistantMessage = createPublishedAssistantMessage(
 			getLastAssistantMessage(session),
@@ -592,13 +629,17 @@ export class PiChatHandler implements ChatHandler {
 			for (const message of outboundMessages) {
 				await this.params.routes.deliverOutbound(
 					this.params.chatId,
-					message
+					message,
+					outboundDestination
 				);
 			}
 		});
 	}
 
-	private async publishCronError(message: string): Promise<void> {
+	private async publishCronError(
+		message: string,
+		outboundDestination: string
+	): Promise<void> {
 		const errorText = `Cron job failed: ${message}`;
 		await this.params.chatExecutor.run(this.params.chatId, async () => {
 			const session = await this.params.runtime.getOrCreateSession(
@@ -612,10 +653,14 @@ export class PiChatHandler implements ChatHandler {
 			session.agent.replaceMessages(
 				session.sessionManager.buildSessionContext().messages
 			);
-			await this.params.routes.deliverOutbound(this.params.chatId, {
-				text: errorText,
-				attachments: [],
-			});
+			await this.params.routes.deliverOutbound(
+				this.params.chatId,
+				{
+					text: errorText,
+					attachments: [],
+				},
+				outboundDestination
+			);
 		});
 	}
 }

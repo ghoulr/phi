@@ -3,20 +3,20 @@
 Routes belong to the service runtime.
 
 ```text
-Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Message endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Internal triggers  ─────►
 ```
 
 ## What it is
 
 Routes are config-driven wiring.
-They dispatch messages and triggers between endpoints and chat handlers.
-They forward to the module configured on the other side.
-They do not interpret what a message means.
+They dispatch interactive messages and internal triggers to chat handlers.
+They also deliver outbound messages to configured message endpoints.
+Each turn carries exactly one outbound destination.
+They do not interpret message meaning.
 
 Route availability comes from config, not from incidental runtime order.
 
-An endpoint may be source-only, sink-only, or bidirectional.
-
 ## Chat relation
 
-A service chat is the config-bound composition of endpoints, routes, and chat handlers around one agent-facing identity.
+A service chat is the config-bound composition of routes, chat handlers, workspace state, and one agent-facing identity.

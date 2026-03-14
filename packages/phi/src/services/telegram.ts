@@ -187,6 +187,7 @@ export async function startTelegramEndpoint(
 		await routes.dispatchInteractive(ctx.instanceId, ctx.routeId, {
 			text: ctx.text,
 			attachments: ctx.attachments,
+			outboundDestination: "telegram",
 			metadata: ctx.metadata,
 			sendTyping: ctx.sendTyping,
 		});
@@ -209,7 +210,7 @@ export async function startTelegramEndpoint(
 			)
 		);
 		unregisterRoutes.push(
-			routes.registerOutboundRoute(target.chatId, {
+			routes.registerOutboundRoute(target.chatId, "telegram", {
 				deliver: async (message) => {
 					const idempotencyKey = createOutboundAuditKey(routeId);
 					const fields = {

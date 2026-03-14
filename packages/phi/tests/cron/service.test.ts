@@ -113,6 +113,7 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
+				"  destination: telegram",
 				"  jobs:",
 				"    - id: daily",
 				"      prompt: jobs/daily.md",
@@ -121,12 +122,16 @@ describe("startCronService", () => {
 			"utf-8"
 		);
 		const routes = new ServiceRoutes();
-		const prompts: string[] = [];
+		const prompts: Array<{ text: string; outboundDestination: string }> =
+			[];
 		routes.registerChatHandler(
 			"alice",
 			createChatHandler({
 				async submitCron(input): Promise<PhiMessage[]> {
-					prompts.push(input.text);
+					prompts.push({
+						text: input.text,
+						outboundDestination: input.outboundDestination,
+					});
 					return [{ text: "done", attachments: [] }];
 				},
 			})
@@ -138,6 +143,12 @@ describe("startCronService", () => {
 					alice: {
 						workspace,
 						agent: "main",
+						routes: {
+							telegram: {
+								id: "42",
+								token: "bot-token",
+							},
+						},
 					},
 				},
 			},
@@ -149,9 +160,60 @@ describe("startCronService", () => {
 		await Bun.sleep(2600);
 		await service.stop();
 
-		expect(prompts).toEqual(["Summarize status."]);
+		expect(prompts).toEqual([
+			{ text: "Summarize status.", outboundDestination: "telegram" },
+		]);
 		expect(readCapturedLogs()).toContain('"event":"cron.run"');
 		expect(readCapturedLogs()).toContain('"status":"ok"');
+	});
+
+	it("fails fast when cron destination is missing", async () => {
+		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+		const workspace = createWorkspace();
+		const layout = ensureChatWorkspaceLayout(workspace);
+		const at = formatLocalDateTime(Date.now() + 2000, timezone);
+		writeFileSync(
+			join(layout.cronJobsDir, "daily.md"),
+			"Summarize status.",
+			"utf-8"
+		);
+		writeFileSync(
+			layout.configFilePath,
+			[
+				"version: 1",
+				"chat:",
+				`  timezone: ${timezone}`,
+				"cron:",
+				"  enabled: true",
+				"  jobs:",
+				"    - id: daily",
+				"      prompt: jobs/daily.md",
+				`      at: "${at}"`,
+			].join("\n"),
+			"utf-8"
+		);
+
+		await expect(
+			startCronService({
+				phiConfig: {
+					chats: {
+						alice: {
+							workspace,
+							agent: "main",
+							routes: {
+								telegram: {
+									id: "42",
+									token: "bot-token",
+								},
+							},
+						},
+					},
+				},
+				chatConfigs: [{ chatId: "alice", workspace }],
+				reloadRegistry: new ChatReloadRegistry(),
+				routes: new ServiceRoutes(),
+			})
+		).rejects.toThrow("Missing cron.destination for chat alice");
 	});
 
 	it("keeps the previous valid schedule when reload fails", async () => {
@@ -172,6 +234,7 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
+				"  destination: telegram",
 				"  jobs:",
 				"    - id: daily",
 				"      prompt: jobs/daily.md",
@@ -198,6 +261,12 @@ describe("startCronService", () => {
 					alice: {
 						workspace,
 						agent: "main",
+						routes: {
+							telegram: {
+								id: "42",
+								token: "bot-token",
+							},
+						},
 					},
 				},
 			},
@@ -214,6 +283,7 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
+				"  destination: telegram",
 				"  jobs:",
 				"    - id: broken",
 				"      prompt: jobs/missing.md",

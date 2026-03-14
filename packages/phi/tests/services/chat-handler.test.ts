@@ -205,7 +205,7 @@ describe("chat handler", () => {
 		};
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "telegram", {
 			async deliver(message): Promise<void> {
 				delivered.push(message.text ?? "");
 			},
@@ -225,6 +225,7 @@ describe("chat handler", () => {
 		await handler.submitInteractive({
 			text: "hello",
 			attachments: [],
+			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 
@@ -275,6 +276,7 @@ describe("chat handler", () => {
 						mimeType: "image/jpeg",
 					},
 				],
+				outboundDestination: "telegram",
 				metadata: {
 					current_message: {
 						message_id: 10,
@@ -303,6 +305,11 @@ describe("chat handler", () => {
 				type: "text",
 				text: expect.stringContaining("<system-reminder>"),
 			});
+			const reminderText = parts.at(-1)?.text;
+			if (typeof reminderText !== "string") {
+				throw new Error("Missing reminder text");
+			}
+			expect(reminderText).toContain("outboundDestination: telegram");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -325,11 +332,17 @@ describe("chat handler", () => {
 				};
 			},
 			async sendUserMessage(
-				content: string,
+				content: unknown,
 				options?: { deliverAs?: "steer" | "followUp" }
 			): Promise<void> {
-				calls.push({ text: content, deliverAs: options?.deliverAs });
-				if (content === "m1") {
+				const text =
+					typeof content === "string"
+						? content
+						: Array.isArray(content) && content[0]?.type === "text"
+							? content[0].text
+							: undefined;
+				calls.push({ text, deliverAs: options?.deliverAs });
+				if (text === "m1") {
 					listener?.(createMessageUpdateEvent("thinking_delta"));
 					streaming = true;
 					await new Promise<void>((resolve) => {
@@ -367,11 +380,13 @@ describe("chat handler", () => {
 		const first = handler.submitInteractive({
 			text: "m1",
 			attachments: [],
+			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 		const second = handler.submitInteractive({
 			text: "m2",
 			attachments: [],
+			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 		for (let attempt = 0; attempt < 10 && calls.length < 2; attempt += 1) {
@@ -434,6 +449,7 @@ describe("chat handler", () => {
 		await handler.submitInteractive({
 			text: "hello",
 			attachments: [],
+			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 
@@ -485,6 +501,7 @@ describe("chat handler", () => {
 			handler.submitInteractive({
 				text: "hello",
 				attachments: [],
+				outboundDestination: "telegram",
 				sendTyping: async () => ({ ok: true }),
 			})
 		).rejects.toThrow("reply failed");
@@ -493,23 +510,24 @@ describe("chat handler", () => {
 		).resolves.toBeUndefined();
 	});
 
-	it("delivers cron instant sends immediately and skips history for NO_REPLY", async () => {
+	it("delivers cron instant sends only to the requested destination and skips history for NO_REPLY", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
-			async deliver(message): Promise<void> {
-				delivered.push(message.text ?? "");
-			},
-		});
 		let resolveDelivered: (() => void) | undefined;
 		const deliveredSignal = new Promise<void>((resolve) => {
 			resolveDelivered = resolve;
 		});
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "telegram", {
 			async deliver(message): Promise<void> {
+				delivered.push(`telegram:${message.text ?? ""}`);
 				if (message.text === "progress") {
 					resolveDelivered?.();
 				}
+			},
+		});
+		routes.registerOutboundRoute("alice", "feishu", {
+			async deliver(message): Promise<void> {
+				delivered.push(`feishu:${message.text ?? ""}`);
 			},
 		});
 		let runtimeCalls = 0;
@@ -556,9 +574,12 @@ describe("chat handler", () => {
 			},
 		});
 
-		const resultPromise = handler.submitCron({ text: "cron prompt" });
+		const resultPromise = handler.submitCron({
+			text: "cron prompt",
+			outboundDestination: "telegram",
+		});
 		await deliveredSignal;
-		expect(delivered).toEqual(["progress"]);
+		expect(delivered).toEqual(["telegram:progress"]);
 		finishTurn?.();
 		expect(await resultPromise).toEqual([]);
 		expect(runtimeCalls).toBe(0);
@@ -567,7 +588,7 @@ describe("chat handler", () => {
 	it("publishes cron final output back to the persistent chat session", async () => {
 		const delivered: string[] = [];
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "telegram", {
 			async deliver(message): Promise<void> {
 				delivered.push(message.text ?? "");
 			},
@@ -625,9 +646,12 @@ describe("chat handler", () => {
 			},
 		});
 
-		expect(await handler.submitCron({ text: "cron prompt" })).toEqual([
-			{ text: "done", attachments: [] },
-		]);
+		expect(
+			await handler.submitCron({
+				text: "cron prompt",
+				outboundDestination: "telegram",
+			})
+		).toEqual([{ text: "done", attachments: [] }]);
 		expect(delivered).toEqual(["done"]);
 		expect(appended).toHaveLength(1);
 		expect(appended[0]?.content).toEqual([{ type: "text", text: "done" }]);
@@ -637,9 +661,14 @@ describe("chat handler", () => {
 	it("creates service session extensions that route visible messages", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", {
+		routes.registerOutboundRoute("alice", "telegram", {
 			async deliver(message): Promise<void> {
-				delivered.push(message.text ?? "");
+				delivered.push(`telegram:${message.text ?? ""}`);
+			},
+		});
+		routes.registerOutboundRoute("alice", "feishu", {
+			async deliver(message): Promise<void> {
+				delivered.push(`feishu:${message.text ?? ""}`);
 			},
 		});
 		const [factory] = createServiceSessionExtensionFactories(
@@ -649,7 +678,17 @@ describe("chat handler", () => {
 		if (!factory) {
 			throw new Error("Missing service session extension factory");
 		}
-		const harness = createMessagingExtensionHarness(factory, "/tmp/alice");
+		const harness = createMessagingExtensionHarness(
+			factory,
+			"/tmp/alice",
+			[
+				"hello",
+				"<system-reminder>",
+				"phi:",
+				"  outboundDestination: telegram",
+				"</system-reminder>",
+			].join("\n")
+		);
 		if (!harness.sendTool) {
 			throw new Error("Missing send tool");
 		}
@@ -663,6 +702,6 @@ describe("chat handler", () => {
 			harness.ctx
 		);
 
-		expect(delivered).toEqual(["done"]);
+		expect(delivered).toEqual(["telegram:done"]);
 	});
 });

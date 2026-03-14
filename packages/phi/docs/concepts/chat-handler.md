@@ -3,16 +3,16 @@
 The chat-bound orchestration point between routes and the agent.
 
 ```text
-Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Message endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Internal triggers  ─────►
 ```
 
 ## What it is
 
-A chat handler binds chat config, workspace state, and agent-facing identity into one runtime unit.
+A chat handler binds chat config, workspace state, and one agent-facing identity into one runtime unit.
 It is the only module that talks to pi.
 
-Interactive path: submit user turns, steer when streaming, subscribe to events.
-Visible output is resolved and delivered by the messaging extension at agent run end.
+Interactive path: submit user turns with one outbound destination, steer when streaming, subscribe to events.
 Reload path: invalidate handler state; the next submit recreates it.
 
-Cron targets the same chat identity through a different endpoint path.
+Cron reaches the same chat through an internal trigger path.

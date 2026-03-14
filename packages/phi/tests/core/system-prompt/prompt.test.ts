@@ -150,6 +150,11 @@ describe("buildPhiSystemPrompt", () => {
 			).toBe(true);
 			expect(
 				prompt.includes(
+					"When creating cron config, default `cron.destination` to the current interactive message source endpoint unless the user asks for a different destination."
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
 					"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends."
 				)
 			).toBe(true);
