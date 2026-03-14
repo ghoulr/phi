@@ -65,7 +65,7 @@ They still target the same chat identity.
 
 ## Reload
 
-Invalid cron config or prompt files make `reload` fail for that chat.
+`reload` validates cron config and prompt files first. Invalid cron config or prompt files make validation fail for that chat.
 
 ## Failure
 

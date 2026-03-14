@@ -79,6 +79,11 @@ class ChatCronScheduler {
 		});
 	}
 
+	public async validate(): Promise<CronReloadResult> {
+		const state = this.loadValidatedState();
+		return this.buildReloadResult(state.jobs);
+	}
+
 	public async reload(): Promise<CronReloadResult> {
 		const previousJobs = this.jobs;
 		const previousTimer = this.timer;
@@ -88,47 +93,16 @@ class ChatCronScheduler {
 		});
 
 		try {
-			const workspaceDir = resolveChatWorkspaceDirectory(
-				this.chatConfig.workspace
-			);
-			const layout = ensureChatWorkspaceLayout(workspaceDir);
-			const workspaceConfig = loadPhiWorkspaceConfig(
-				layout.configFilePath
-			);
-			const timezone = resolveWorkspaceTimezone(
-				workspaceConfig,
-				layout.configFilePath
-			);
-			const loadedJobs = loadCronJobs({
-				layout,
-				workspaceConfig,
-			});
-			if (loadedJobs.length > 0 && !timezone) {
-				throw new Error(
-					`Missing chat.timezone for cron chat ${this.chatConfig.chatId}`
-				);
-			}
-			this.timezone = timezone;
-			this.jobs = loadedJobs.map((job) => ({
-				...job,
-				nextRunAtMs: this.computeNextRunAtMs(job),
-			}));
+			const state = this.loadValidatedState();
+			this.timezone = state.timezone;
+			this.jobs = state.jobs;
 			if (previousTimer) {
 				clearTimeout(previousTimer);
 			}
 			this.timer = undefined;
 			this.armTimer();
 
-			const result = {
-				jobCount: this.jobs.length,
-				nextRunAtMs: this.jobs
-					.map((job) => job.nextRunAtMs)
-					.filter(
-						(nextRunAtMs): nextRunAtMs is number =>
-							typeof nextRunAtMs === "number"
-					)
-					.sort((left, right) => left - right)[0],
-			};
+			const result = this.buildReloadResult(this.jobs);
 			log.debug("cron.scheduler.reload_completed", {
 				chatId: this.chatConfig.chatId,
 				jobCount: result.jobCount,
@@ -145,6 +119,50 @@ class ChatCronScheduler {
 			});
 			throw error;
 		}
+	}
+
+	private loadValidatedState(): {
+		timezone: string | undefined;
+		jobs: LoadedCronJob[];
+	} {
+		const workspaceDir = resolveChatWorkspaceDirectory(
+			this.chatConfig.workspace
+		);
+		const layout = ensureChatWorkspaceLayout(workspaceDir);
+		const workspaceConfig = loadPhiWorkspaceConfig(layout.configFilePath);
+		const timezone = resolveWorkspaceTimezone(
+			workspaceConfig,
+			layout.configFilePath
+		);
+		const loadedJobs = loadCronJobs({
+			layout,
+			workspaceConfig,
+		});
+		if (loadedJobs.length > 0 && !timezone) {
+			throw new Error(
+				`Missing chat.timezone for cron chat ${this.chatConfig.chatId}`
+			);
+		}
+		return {
+			timezone,
+			jobs: loadedJobs.map((job) => ({
+				...job,
+				nextRunAtMs: this.computeNextRunAtMs(job),
+			})),
+		};
+	}
+
+	private buildReloadResult(jobs: LoadedCronJob[]): CronReloadResult {
+		return {
+			jobCount: jobs.length,
+			nextRunAtMs: jobs
+				.map((job) => job.nextRunAtMs)
+				.filter(
+					(nextRunAtMs): nextRunAtMs is number =>
+						typeof nextRunAtMs === "number"
+				)
+				.sort((left, right) => left - right)[0],
+		};
 	}
 
 	private getTimezone(): string {
@@ -289,9 +307,15 @@ export async function startCronService(params: {
 		await scheduler.start();
 		schedulers.set(chatConfig.chatId, scheduler);
 		unregisterHandlers.push(
-			params.reloadRegistry.register(chatConfig.chatId, async () => {
-				const result = await scheduler.reload();
-				return [`cron:${String(result.jobCount)}`];
+			params.reloadRegistry.register(chatConfig.chatId, {
+				validate: async () => {
+					const result = await scheduler.validate();
+					return [`cron:${String(result.jobCount)}`];
+				},
+				apply: async () => {
+					const result = await scheduler.reload();
+					return [`cron:${String(result.jobCount)}`];
+				},
 			})
 		);
 	}

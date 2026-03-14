@@ -45,6 +45,7 @@ export interface ServiceCommandDependencies {
 		runtime: ChatSessionRuntime<AgentSession>;
 		chatExecutor: ChatExecutor;
 		routes: ServiceRoutes;
+		reloadRegistry: ChatReloadRegistry;
 	}): ChatHandler;
 	startTelegramEndpoint(
 		routes: ServiceRoutes,
@@ -211,15 +212,19 @@ export async function runServiceCommand(
 				runtime,
 				chatExecutor,
 				routes,
+				reloadRegistry,
 			});
 			chatHandlers.push(handler);
 			unregisterHandlers.push(
 				routes.registerChatHandler(chatId, handler)
 			);
 			unregisterHandlers.push(
-				reloadRegistry.register(chatId, async () => {
-					handler.invalidate();
-					return ["chat-handler"];
+				reloadRegistry.register(chatId, {
+					validate: () => handler.validateReload(),
+					apply: async () => {
+						handler.invalidate();
+						return ["chat-handler"];
+					},
 				})
 			);
 		}

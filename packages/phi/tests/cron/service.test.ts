@@ -75,6 +75,9 @@ function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
 		async submitCron(): Promise<PhiMessage[]> {
 			return [];
 		},
+		async validateReload(): Promise<string[]> {
+			return [];
+		},
 		invalidate(): void {},
 		dispose(): void {},
 		...overrides,
@@ -219,7 +222,7 @@ describe("startCronService", () => {
 			"utf-8"
 		);
 
-		await expect(reloadRegistry.reload("alice")).rejects.toThrow(
+		await expect(reloadRegistry.validate("alice")).rejects.toThrow(
 			"Missing prompt file for cron job broken"
 		);
 		await Bun.sleep(2600);

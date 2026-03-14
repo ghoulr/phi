@@ -14,6 +14,7 @@ import {
 
 import type { ChatExecutor } from "@phi/core/chat-executor";
 import type { PhiConfig } from "@phi/core/config";
+import type { ChatReloadRegistry } from "@phi/core/reload";
 import { getPhiLogger } from "@phi/core/logger";
 import { sanitizeInboundText } from "@phi/core/message-text";
 import {
@@ -453,12 +454,14 @@ function createCronMessagingExtensionFactories(params: {
 export interface ChatHandler {
 	submitInteractive(input: ChatHandlerInteractiveInput): Promise<void>;
 	submitCron(input: ChatHandlerCronInput): Promise<PhiMessage[]>;
+	validateReload(): Promise<string[]>;
 	invalidate(): void;
 	dispose(): void;
 }
 
 export interface PiChatHandlerDependencies {
 	createCronSession?: typeof createPhiAgentSession;
+	createValidationSession?: typeof createPhiAgentSession;
 }
 
 export interface CreatePiChatHandlerParams {
@@ -467,6 +470,7 @@ export interface CreatePiChatHandlerParams {
 	runtime: ChatSessionRuntime<AgentSession>;
 	chatExecutor: ChatExecutor;
 	routes: ServiceRoutes;
+	reloadRegistry: ChatReloadRegistry;
 	dependencies?: PiChatHandlerDependencies;
 }
 
@@ -480,10 +484,14 @@ export function createServiceSessionExtensionFactories(
 export class PiChatHandler implements ChatHandler {
 	private readonly interactiveSession: InteractiveSession;
 	private readonly createCronSession: typeof createPhiAgentSession;
+	private readonly createValidationSession: typeof createPhiAgentSession;
 
 	public constructor(private readonly params: CreatePiChatHandlerParams) {
 		this.createCronSession =
 			params.dependencies?.createCronSession ?? createPhiAgentSession;
+		this.createValidationSession =
+			params.dependencies?.createValidationSession ??
+			createPhiAgentSession;
 		this.interactiveSession = new InteractiveSession(
 			params.runtime,
 			params.chatId
@@ -493,10 +501,16 @@ export class PiChatHandler implements ChatHandler {
 	public async submitInteractive(
 		input: ChatHandlerInteractiveInput
 	): Promise<void> {
-		await this.interactiveSession.submit({
-			content: buildInteractiveAgentContent(input),
-			sendTyping: input.sendTyping,
-		});
+		try {
+			await this.interactiveSession.submit({
+				content: buildInteractiveAgentContent(input),
+				sendTyping: input.sendTyping,
+			});
+		} catch (error: unknown) {
+			this.params.reloadRegistry.clearPending(this.params.chatId);
+			throw error;
+		}
+		await this.params.reloadRegistry.applyPending(this.params.chatId);
 	}
 
 	public async submitCron(
@@ -525,6 +539,21 @@ export class PiChatHandler implements ChatHandler {
 				error instanceof Error ? error.message : String(error)
 			);
 			throw error;
+		} finally {
+			session.dispose();
+		}
+	}
+
+	public async validateReload(): Promise<string[]> {
+		const session = await this.createValidationSession(
+			this.params.chatId,
+			this.params.phiConfig,
+			{
+				sessionManager: SessionManager.inMemory(),
+			}
+		);
+		try {
+			return ["chat-handler"];
 		} finally {
 			session.dispose();
 		}

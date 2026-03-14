@@ -10,6 +10,9 @@ function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
 		async submitCron(): Promise<PhiMessage[]> {
 			return [];
 		},
+		async validateReload(): Promise<string[]> {
+			return [];
+		},
 		invalidate(): void {},
 		dispose(): void {},
 		...overrides,

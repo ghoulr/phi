@@ -24,7 +24,7 @@ const TOOL_DESCRIPTION_MAP: Record<string, string> = {
 	bash: "Execute bash commands (ls, rg, find, etc.)",
 	edit: "Make surgical edits to files (exact text replacement)",
 	write: "Create or overwrite files",
-	reload: "Recreate the current chat session from workspace files",
+	reload: "Validate workspace changes and schedule them to apply after the current reply ends",
 	send: "Send a user-visible message immediately or stage it for your final output",
 };
 
@@ -158,7 +158,7 @@ function buildWorkspaceSection(params: {
 		"",
 		"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions.",
 		"",
-		"After workspace config changes, call `reload`.",
+		"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends.",
 		"",
 		"See `docs/concepts/workspace-config.md`."
 	);

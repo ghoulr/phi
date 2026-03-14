@@ -150,7 +150,7 @@ describe("buildPhiSystemPrompt", () => {
 			).toBe(true);
 			expect(
 				prompt.includes(
-					"After workspace config changes, call `reload`."
+					"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends."
 				)
 			).toBe(true);
 		} finally {

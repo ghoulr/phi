@@ -106,6 +106,9 @@ describe("service command", () => {
 					async submitCron() {
 						return [];
 					},
+					async validateReload() {
+						return [];
+					},
 					invalidate() {},
 					dispose() {},
 				};
@@ -184,6 +187,9 @@ describe("service command", () => {
 					async submitCron() {
 						return [];
 					},
+					async validateReload() {
+						return [];
+					},
 					invalidate() {},
 					dispose() {},
 				};
@@ -235,6 +241,9 @@ describe("service command", () => {
 					async submitCron() {
 						return [];
 					},
+					async validateReload() {
+						return [];
+					},
 					invalidate() {},
 					dispose() {},
 				};
@@ -276,6 +285,9 @@ describe("service command", () => {
 				return {
 					async submitInteractive() {},
 					async submitCron() {
+						return [];
+					},
+					async validateReload() {
 						return [];
 					},
 					invalidate() {},

@@ -44,7 +44,7 @@ Service chat appends extra guidance:
 
 - Workspace config: `<workspace>/.phi/config.yaml`
 - Template: `<workspace>/.phi/config.template.yaml`
-- Call `reload` after workspace config changes
+- Call `reload` after workspace config changes to validate them and schedule apply after the current reply ends
 
 See `docs/concepts/workspace-config.md`.
 

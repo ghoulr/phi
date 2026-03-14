@@ -11,11 +11,12 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ChatExecutor } from "@phi/core/chat-executor";
+import type { PhiConfig } from "@phi/core/config";
+import { ChatReloadRegistry } from "@phi/core/reload";
 import type {
 	ChatSessionRuntime,
 	CreatePhiAgentSessionOptions,
 } from "@phi/core/runtime";
-import type { PhiConfig } from "@phi/core/config";
 import {
 	PiChatHandler,
 	createServiceSessionExtensionFactories,
@@ -218,6 +219,7 @@ describe("chat handler", () => {
 			runtime,
 			chatExecutor: createImmediateExecutor(),
 			routes,
+			reloadRegistry: new ChatReloadRegistry(),
 		});
 
 		await handler.submitInteractive({
@@ -261,6 +263,7 @@ describe("chat handler", () => {
 				runtime,
 				chatExecutor: createImmediateExecutor(),
 				routes: new ServiceRoutes(),
+				reloadRegistry: new ChatReloadRegistry(),
 			});
 
 			await handler.submitInteractive({
@@ -358,6 +361,7 @@ describe("chat handler", () => {
 			runtime,
 			chatExecutor: createImmediateExecutor(),
 			routes: new ServiceRoutes(),
+			reloadRegistry: new ChatReloadRegistry(),
 		});
 
 		const first = handler.submitInteractive({
@@ -382,6 +386,111 @@ describe("chat handler", () => {
 		}
 		releaseFirst();
 		await Promise.all([first, second]);
+	});
+
+	it("applies pending reload after the interactive reply finishes", async () => {
+		const reloadRegistry = new ChatReloadRegistry();
+		const calls: string[] = [];
+		reloadRegistry.register("alice", {
+			validate: async () => {
+				calls.push("validate");
+				return ["chat-handler"];
+			},
+			apply: async () => {
+				calls.push("apply");
+				return ["chat-handler"];
+			},
+		});
+		const session = {
+			isStreaming: false,
+			subscribe() {
+				return () => {};
+			},
+			async sendUserMessage(): Promise<void> {
+				await reloadRegistry.request("alice");
+				calls.push("reply-finished");
+			},
+			dispose(): void {},
+		} as unknown as AgentSession;
+		const runtime: ChatSessionRuntime<AgentSession> = {
+			async getOrCreateSession() {
+				return session;
+			},
+			disposeSession(): boolean {
+				return true;
+			},
+		};
+		const handler = new PiChatHandler({
+			chatId: "alice",
+			phiConfig: {
+				chats: { alice: { workspace: "~/alice", agent: "main" } },
+			},
+			runtime,
+			chatExecutor: createImmediateExecutor(),
+			routes: new ServiceRoutes(),
+			reloadRegistry,
+		});
+
+		await handler.submitInteractive({
+			text: "hello",
+			attachments: [],
+			sendTyping: async () => ({ ok: true }),
+		});
+
+		expect(calls).toEqual(["validate", "reply-finished", "apply"]);
+		await expect(
+			reloadRegistry.applyPending("alice")
+		).resolves.toBeUndefined();
+	});
+
+	it("clears pending reload when the interactive reply fails", async () => {
+		const reloadRegistry = new ChatReloadRegistry();
+		reloadRegistry.register("alice", {
+			validate: async () => ["chat-handler"],
+			apply: async () => {
+				throw new Error("should not apply");
+			},
+		});
+		const session = {
+			isStreaming: false,
+			subscribe() {
+				return () => {};
+			},
+			async sendUserMessage(): Promise<void> {
+				await reloadRegistry.request("alice");
+				throw new Error("reply failed");
+			},
+			dispose(): void {},
+		} as unknown as AgentSession;
+		const runtime: ChatSessionRuntime<AgentSession> = {
+			async getOrCreateSession() {
+				return session;
+			},
+			disposeSession(): boolean {
+				return true;
+			},
+		};
+		const handler = new PiChatHandler({
+			chatId: "alice",
+			phiConfig: {
+				chats: { alice: { workspace: "~/alice", agent: "main" } },
+			},
+			runtime,
+			chatExecutor: createImmediateExecutor(),
+			routes: new ServiceRoutes(),
+			reloadRegistry,
+		});
+
+		await expect(
+			handler.submitInteractive({
+				text: "hello",
+				attachments: [],
+				sendTyping: async () => ({ ok: true }),
+			})
+		).rejects.toThrow("reply failed");
+		await expect(
+			reloadRegistry.applyPending("alice")
+		).resolves.toBeUndefined();
 	});
 
 	it("delivers cron instant sends immediately and skips history for NO_REPLY", async () => {
@@ -425,6 +534,7 @@ describe("chat handler", () => {
 			runtime,
 			chatExecutor: createImmediateExecutor(),
 			routes,
+			reloadRegistry: new ChatReloadRegistry(),
 			dependencies: {
 				createCronSession: createFakeCronSessionFactory({
 					workspace: "/tmp/alice",
@@ -504,6 +614,7 @@ describe("chat handler", () => {
 			runtime,
 			chatExecutor: createImmediateExecutor(),
 			routes,
+			reloadRegistry: new ChatReloadRegistry(),
 			dependencies: {
 				createCronSession: createFakeCronSessionFactory({
 					workspace: "/tmp/alice",

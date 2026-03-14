@@ -11,15 +11,15 @@ export function createReloadTool(
 		name: "reload",
 		label: "Reload",
 		description:
-			"Recreate the current phi chat session from workspace files after config or file changes.",
+			"Validate workspace changes and schedule them to apply after the current reply ends.",
 		parameters: Type.Object({}),
 		execute: async () => {
-			const result = await reloadRegistry.reload(chatId);
+			const result = await reloadRegistry.request(chatId);
 			return {
 				content: [
 					{
 						type: "text" as const,
-						text: `Reloaded chat ${result.chatId}: ${result.reloaded.join(", ")}`,
+						text: `Reload scheduled for chat ${result.chatId}: ${result.reloaded.join(", ")}. Changes apply after this reply ends.`,
 					},
 				],
 				details: result,

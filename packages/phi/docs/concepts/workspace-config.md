@@ -22,7 +22,7 @@ Agents do not modify it.
 
 1. Read the template to see available options.
 2. Edit `config.yaml` with normal file tools.
-3. Call `reload` to apply config changes.
+3. Call `reload` to validate config changes and schedule them to apply after the current reply ends.
 
 Skill file creation and edits do not need `reload`.
 New sessions discover the updated skill set automatically.
@@ -30,7 +30,8 @@ New sessions discover the updated skill set automatically.
 ## Reload
 
 Chat-scoped, no parameters.
-Recreates the current session from workspace files.
+Validates workspace-backed runtime state, then schedules apply for after the current reply ends.
+Validation failures throw immediately.
 The current turn finishes normally; the new session takes effect on the next turn.
 
 ## Template source
