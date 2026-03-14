@@ -1,57 +1,72 @@
 # ARCHITECT: phi
 
 phi is a chat runtime built on top of pi.
-It connects external message endpoints and internal triggers to one chat runtime.
-
-## Principles
-
-- Keep it simple.
-- Fail fast.
-- No backward compatibility.
-- Reuse pi as much as possible.
 
 ## Core model
 
+- `agent`: execution config template
+- `chat`: workspace-scoped long-lived context
+- `session`: one conversation state inside a chat
+- `routes`: runtime routing table between external inputs, sessions, and outbound deliveries
+
+## Relations
+
+- one `chat` owns one workspace
+- one `chat` contains many `sessions`
+- one `session` belongs to one `chat`
+- one `session` uses one `agent`
+- one `agent` can be reused by many `sessions`
+- one inbound route targets one `session`
+
+## Runtime
+
 ```text
-Message endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
-Internal triggers  ─────►
+Message endpoints  ──┐
+Cron triggers      ──┼──► Routes ───► Session ───► Agent(pi)
+Outbound delivery  ◄─┘
 ```
 
-- **Message endpoints** — external messaging surfaces such as Telegram and Feishu
-- **Routes** — config-driven wiring into chat handlers
-- **Chat handlers** — chat-bound runtime that talks to pi
-- **Agent(pi)** — prompt execution, queueing, steering, tools
+The runtime owns:
+- `routes`
+- one chat-scoped session manager per chat
+- session lifecycle
+- endpoint and cron bindings
 
-Cron is an internal trigger path.
-It is not a message endpoint provider.
+## Chat
 
-## Chat model
+A chat is the workspace-scoped container for runtime state.
 
-A chat is not a transport name.
-A chat is the config-bound composition of routes, chat handlers, workspace state, and one agent-facing identity.
+A service chat owns:
+- workspace config
+- sessions
+- memory
+- skills
+- inbox
+- cron prompt files
 
-| Dimension | Service chat | TUI chat |
-|-----------|-------------|----------|
-| message side | configured message endpoints | terminal |
-| state root | `<workspace>/.phi` | `~/.phi/pi` |
-| working context | configured workspace | current `cwd` |
-| behavior | phi-owned | phi-owned |
+## Session
 
-## Config
+A session is one conversation state inside a chat.
+Different endpoints should usually use different sessions.
+Cron also targets a session.
 
-Operator-owned config lives in `~/.phi/phi.yaml`.
-It binds chats to agents and message routes.
+pi still runs on one session file at a time.
+phi manages which session file to load.
 
-Workspace config lives in `<workspace>/.phi/config.yaml`.
-It stores chat-local settings, cron config, and skills config.
+## Agent
+
+An agent is only execution config.
+Typical fields are provider, model, and thinking level.
 
 ## Routes
 
-Routes do only wiring.
-They do not interpret message meaning.
-They accept both:
-- interactive messages from external message endpoints
-- internal triggers such as cron
+Routes map:
+- inbound endpoint route to session
+- inbound cron trigger to session
+- session to outbound delivery
+
+Default reply flow is route-local.
+A message normally replies through the same route that entered the session.
 
 ## Storage
 
@@ -66,8 +81,9 @@ They accept both:
 <workspace>/
 └─ .phi/
    ├─ config.yaml
-   ├─ config.template.yaml
    ├─ sessions/
+   │  ├─ index.json
+   │  └─ <sessionId>.jsonl
    ├─ skills/
    ├─ memory/
    ├─ inbox/
@@ -75,14 +91,8 @@ They accept both:
       └─ jobs/
 ```
 
-## Reload
-
-`reload` is chat-scoped.
-It invalidates the current chat handler state.
-The next turn recreates it.
-
 ## Failure strategy
 
 Fail fast.
 Do not hide errors.
-Notify the user when failures affect visible behavior.
+Send the error to the endpoint so the user knows.

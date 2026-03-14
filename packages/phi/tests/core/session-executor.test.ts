@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
-import { InMemoryChatExecutor } from "@phi/core/chat-executor";
+import { InMemorySessionExecutor } from "@phi/core/session-executor";
 
-describe("InMemoryChatExecutor", () => {
-	it("runs different chats concurrently", async () => {
-		const executor = new InMemoryChatExecutor();
+describe("InMemorySessionExecutor", () => {
+	it("runs different sessions concurrently", async () => {
+		const executor = new InMemorySessionExecutor();
 		const order: string[] = [];
 		let releaseAlice: (() => void) | undefined;
 
@@ -33,8 +33,8 @@ describe("InMemoryChatExecutor", () => {
 		]);
 	});
 
-	it("serializes tasks for the same chat", async () => {
-		const executor = new InMemoryChatExecutor();
+	it("serializes tasks for the same session", async () => {
+		const executor = new InMemorySessionExecutor();
 		const order: string[] = [];
 		let releaseFirst: (() => void) | undefined;
 

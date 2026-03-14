@@ -7,23 +7,24 @@ import {
 	DefaultResourceLoader,
 	type ExtensionFactory,
 	ModelRegistry,
-	type AgentSession,
 	SessionManager,
+	type AgentSession,
 	type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 
 import {
-	ChatSessionPool,
-	type ChatSessionFactory,
+	SessionPool,
+	type SessionFactory,
 	type DisposableSession,
-} from "@phi/core/chat-pool";
+} from "@phi/core/session-pool";
 import {
 	ensureChatWorkspaceLayout,
 	resolveChatWorkspaceDirectory,
 } from "@phi/core/chat-workspace";
+import { ChatSessionManager } from "@phi/core/session-manager";
 import {
 	resolveAgentRuntimeConfig,
-	resolveChatRuntimeConfig,
+	resolveSessionRuntimeConfig,
 	type PhiConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
@@ -43,24 +44,24 @@ import { installPhiSystemPrompt } from "@phi/core/system-prompt";
 import { createPhiMemoryMaintenanceExtension } from "@phi/extensions/memory-maintenance";
 
 export {
-	ChatSessionPool,
-	type ChatSessionFactory,
-	type ChatSessionRuntime,
+	SessionPool,
+	type SessionFactory,
+	type SessionRuntime,
 	type DisposableSession,
-} from "@phi/core/chat-pool";
+} from "@phi/core/session-pool";
 
 const log = getPhiLogger("runtime");
 
 export interface CreatePhiAgentSessionOptions {
-	sessionManager?: SessionManager;
 	customTools?: ToolDefinition[];
 	extensionFactories?: ExtensionFactory[];
 	printSystemPrompt?: boolean;
+	persistSession?: boolean;
 }
 
 export interface PhiRuntimeDependencies {
-	getCustomTools?(chatId: string): ToolDefinition[];
-	getExtensionFactories?(chatId: string): ExtensionFactory[];
+	getCustomTools?(sessionId: string): ToolDefinition[];
+	getExtensionFactories?(sessionId: string): ExtensionFactory[];
 }
 
 interface ResolvedPhiSessionContext {
@@ -73,6 +74,8 @@ interface ResolvedPhiSessionContext {
 	chatWorkspaceLayout: ReturnType<typeof ensureChatWorkspaceLayout>;
 	workspaceConfig: ReturnType<typeof loadPhiWorkspaceConfig>;
 	resourceLoader: DefaultResourceLoader;
+	chatSessionManager: ChatSessionManager;
+	sessionId: string;
 }
 
 async function createPhiResourceLoader(params: {
@@ -123,25 +126,31 @@ async function createPhiResourceLoader(params: {
 }
 
 async function resolvePhiSessionContext(
-	chatId: string,
+	sessionId: string,
 	phiConfig: PhiConfig,
+	chatSessionManagers: Map<string, ChatSessionManager>,
 	options: Pick<CreatePhiAgentSessionOptions, "extensionFactories">
 ): Promise<ResolvedPhiSessionContext> {
 	const userHomeDir = homedir();
-	const chatConfig = resolveChatRuntimeConfig(phiConfig, chatId);
+	const sessionConfig = resolveSessionRuntimeConfig(phiConfig, sessionId);
 	const chatWorkspaceDir = resolveChatWorkspaceDirectory(
-		chatConfig.workspace,
+		sessionConfig.workspace,
 		userHomeDir
 	);
 	const chatWorkspaceLayout = ensureChatWorkspaceLayout(chatWorkspaceDir);
 	const workspaceConfig = loadPhiWorkspaceConfig(
 		chatWorkspaceLayout.configFilePath
 	);
+	let chatSessionManager = chatSessionManagers.get(sessionConfig.chatId);
+	if (!chatSessionManager) {
+		chatSessionManager = new ChatSessionManager(chatWorkspaceLayout);
+		chatSessionManagers.set(sessionConfig.chatId, chatSessionManager);
+	}
 
 	const agentDir = resolveExistingPhiPiAgentDir(userHomeDir);
 	const agentConfig = resolveAgentRuntimeConfig(
 		phiConfig,
-		chatConfig.agentId
+		sessionConfig.agentId
 	);
 	const authStorage = AuthStorage.create(
 		getPhiSharedAuthFilePath(userHomeDir)
@@ -153,7 +162,7 @@ async function resolvePhiSessionContext(
 	const model = modelRegistry.find(agentConfig.provider, agentConfig.model);
 	if (!model) {
 		throw new Error(
-			`Unknown model for agent ${chatConfig.agentId}: ${agentConfig.provider}/${agentConfig.model}`
+			`Unknown model for agent ${sessionConfig.agentId}: ${agentConfig.provider}/${agentConfig.model}`
 		);
 	}
 
@@ -164,9 +173,10 @@ async function resolvePhiSessionContext(
 		extensionFactories: options.extensionFactories,
 	});
 	log.info("runtime.session_context.resolved", {
-		chatId,
+		sessionId,
+		chatId: sessionConfig.chatId,
 		workspaceDir: chatWorkspaceDir,
-		agentId: chatConfig.agentId,
+		agentId: sessionConfig.agentId,
 		provider: agentConfig.provider,
 		model: agentConfig.model,
 	});
@@ -181,6 +191,8 @@ async function resolvePhiSessionContext(
 		chatWorkspaceLayout,
 		workspaceConfig,
 		resourceLoader,
+		chatSessionManager,
+		sessionId,
 	};
 }
 
@@ -199,18 +211,25 @@ function printInjectedSystemPrompt(systemPrompt: string): void {
 }
 
 export async function createPhiAgentSession(
-	chatId: string,
+	sessionId: string,
 	phiConfig: PhiConfig,
-	options: CreatePhiAgentSessionOptions = {}
+	options: CreatePhiAgentSessionOptions = {},
+	chatSessionManagers: Map<string, ChatSessionManager> = new Map()
 ): Promise<AgentSession> {
 	log.info("runtime.session.creating", {
-		chatId,
+		sessionId,
 		customToolCount: options.customTools?.length ?? 0,
 		extensionFactoryCount: options.extensionFactories?.length ?? 0,
+		persistSession: options.persistSession !== false,
 	});
-	const context = await resolvePhiSessionContext(chatId, phiConfig, {
-		extensionFactories: options.extensionFactories,
-	});
+	const context = await resolvePhiSessionContext(
+		sessionId,
+		phiConfig,
+		chatSessionManagers,
+		{
+			extensionFactories: options.extensionFactories,
+		}
+	);
 
 	const envOverrides = resolveLoadedSkillEnvOverrides({
 		skills: context.resourceLoader.getSkills().skills,
@@ -229,11 +248,12 @@ export async function createPhiAgentSession(
 			model: context.model,
 			thinkingLevel: context.agentConfig.thinkingLevel,
 			sessionManager:
-				options.sessionManager ??
-				SessionManager.continueRecent(
-					context.chatWorkspaceDir,
-					context.chatWorkspaceLayout.sessionsDir
-				),
+				options.persistSession === false
+					? SessionManager.inMemory(context.chatWorkspaceDir)
+					: context.chatSessionManager.openPiSession(
+							context.sessionId,
+							context.agentConfig.agentId
+						),
 			resourceLoader: context.resourceLoader,
 			customTools: options.customTools,
 		});
@@ -264,7 +284,7 @@ export async function createPhiAgentSession(
 		printInjectedSystemPrompt(systemPrompt);
 	}
 	log.info("runtime.session.created", {
-		chatId,
+		sessionId,
 		workspaceDir: context.chatWorkspaceDir,
 		provider: context.agentConfig.provider,
 		model: context.agentConfig.model,
@@ -273,25 +293,41 @@ export async function createPhiAgentSession(
 }
 
 async function createDefaultAgentSession(
-	chatId: string,
+	sessionId: string,
 	phiConfig: PhiConfig,
+	chatSessionManagers: Map<string, ChatSessionManager>,
 	dependencies: PhiRuntimeDependencies = {}
 ): Promise<AgentSession> {
-	return await createPhiAgentSession(chatId, phiConfig, {
-		customTools: dependencies.getCustomTools?.(chatId) ?? [],
-		extensionFactories: dependencies.getExtensionFactories?.(chatId) ?? [],
-	});
+	return await createPhiAgentSession(
+		sessionId,
+		phiConfig,
+		{
+			customTools: dependencies.getCustomTools?.(sessionId) ?? [],
+			extensionFactories:
+				dependencies.getExtensionFactories?.(sessionId) ?? [],
+		},
+		chatSessionManagers
+	);
 }
 
 export class PhiRuntime<
 	TSession extends DisposableSession,
-> extends ChatSessionPool<TSession> {}
+> extends SessionPool<TSession> {}
 
 export function createPhiRuntime(
 	phiConfig: PhiConfig,
 	dependencies: PhiRuntimeDependencies = {},
-	sessionFactory: ChatSessionFactory<AgentSession> = (chatId: string) =>
-		createDefaultAgentSession(chatId, phiConfig, dependencies)
+	sessionFactory?: SessionFactory<AgentSession>
 ): PhiRuntime<AgentSession> {
-	return new PhiRuntime<AgentSession>(sessionFactory);
+	const chatSessionManagers = new Map<string, ChatSessionManager>();
+	return new PhiRuntime<AgentSession>(
+		sessionFactory ??
+			((sessionId: string) =>
+				createDefaultAgentSession(
+					sessionId,
+					phiConfig,
+					chatSessionManagers,
+					dependencies
+				))
+	);
 }

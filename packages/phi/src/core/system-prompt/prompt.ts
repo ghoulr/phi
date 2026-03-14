@@ -157,7 +157,7 @@ function buildWorkspaceSection(params: {
 		"- skills env",
 		"",
 		"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions.",
-		"When creating cron config, default `cron.destination` to the current interactive message source endpoint unless the user asks for a different destination.",
+		"Cron jobs live in workspace config. The target session is configured in `~/.phi/phi.yaml`.",
 		"",
 		"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends.",
 		"",

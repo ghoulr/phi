@@ -1,21 +1,21 @@
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 
 import {
-	InMemoryChatExecutor,
-	type ChatExecutor,
-} from "@phi/core/chat-executor";
+	InMemorySessionExecutor,
+	type SessionExecutor,
+} from "@phi/core/session-executor";
 import {
-	collectTelegramChatServiceConfigs,
-	resolveCronChatServiceConfigs,
+	collectTelegramSessionServiceConfigs,
+	resolveCronSessionServiceConfigs,
 	type PhiConfig,
-	type ResolvedCronChatServiceConfig,
-	type ResolvedTelegramChatServiceConfig,
+	type ResolvedCronSessionServiceConfig,
+	type ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
 import { getPhiLogger } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
-import type { ChatSessionRuntime } from "@phi/core/runtime";
+import type { SessionRuntime } from "@phi/core/runtime";
 import { startCronService, type RunningCronService } from "@phi/cron/service";
-import { PiChatHandler, type ChatHandler } from "@phi/services/chat-handler";
+import { PiSessionRuntime, type Session } from "@phi/services/session";
 import { ServiceRoutes } from "@phi/services/routes";
 import {
 	startTelegramEndpoint as startTelegramService,
@@ -32,44 +32,49 @@ interface RunningServicePart {
 const log = getPhiLogger("service");
 
 export interface ServiceCommandDependencies {
-	resolveTelegramChats(
+	resolveTelegramSessions(
 		phiConfig: PhiConfig
-	): ResolvedTelegramChatServiceConfig[];
-	resolveCronChats(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[];
-	createChatExecutor(): ChatExecutor;
+	): ResolvedTelegramSessionServiceConfig[];
+	resolveCronSessions(
+		phiConfig: PhiConfig
+	): ResolvedCronSessionServiceConfig[];
+	createSessionExecutor(): SessionExecutor;
 	createReloadRegistry(): ChatReloadRegistry;
 	createRoutes(): ServiceRoutes;
-	createChatHandler(params: {
+	createSession(params: {
+		sessionId: string;
 		chatId: string;
 		phiConfig: PhiConfig;
-		runtime: ChatSessionRuntime<AgentSession>;
-		chatExecutor: ChatExecutor;
+		runtime: SessionRuntime<AgentSession>;
+		sessionExecutor: SessionExecutor;
 		routes: ServiceRoutes;
 		reloadRegistry: ChatReloadRegistry;
-	}): ChatHandler;
+	}): Session;
 	startTelegramEndpoint(
 		routes: ServiceRoutes,
 		config: ResolvedTelegramEndpointConfig
 	): Promise<RunningTelegramEndpoint>;
 	startCronRuntime(
 		phiConfig: PhiConfig,
-		chatConfigs: ResolvedCronChatServiceConfig[],
+		sessionConfigs: ResolvedCronSessionServiceConfig[],
 		reloadRegistry: ChatReloadRegistry,
 		routes: ServiceRoutes
 	): Promise<RunningCronService>;
 }
 
 const defaultServiceCommandDependencies: ServiceCommandDependencies = {
-	resolveTelegramChats(
+	resolveTelegramSessions(
 		phiConfig: PhiConfig
-	): ResolvedTelegramChatServiceConfig[] {
-		return collectTelegramChatServiceConfigs(phiConfig);
+	): ResolvedTelegramSessionServiceConfig[] {
+		return collectTelegramSessionServiceConfigs(phiConfig);
 	},
-	resolveCronChats(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[] {
-		return resolveCronChatServiceConfigs(phiConfig);
+	resolveCronSessions(
+		phiConfig: PhiConfig
+	): ResolvedCronSessionServiceConfig[] {
+		return resolveCronSessionServiceConfigs(phiConfig);
 	},
-	createChatExecutor(): ChatExecutor {
-		return new InMemoryChatExecutor();
+	createSessionExecutor(): SessionExecutor {
+		return new InMemorySessionExecutor();
 	},
 	createReloadRegistry(): ChatReloadRegistry {
 		return new ChatReloadRegistry();
@@ -77,8 +82,8 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	createRoutes(): ServiceRoutes {
 		return new ServiceRoutes();
 	},
-	createChatHandler(params): ChatHandler {
-		return new PiChatHandler(params);
+	createSession(params): Session {
+		return new PiSessionRuntime(params);
 	},
 	startTelegramEndpoint(
 		routes: ServiceRoutes,
@@ -88,13 +93,13 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	},
 	startCronRuntime(
 		phiConfig: PhiConfig,
-		chatConfigs: ResolvedCronChatServiceConfig[],
+		sessionConfigs: ResolvedCronSessionServiceConfig[],
 		reloadRegistry: ChatReloadRegistry,
 		routes: ServiceRoutes
 	): Promise<RunningCronService> {
 		return startCronService({
 			phiConfig,
-			chatConfigs,
+			sessionConfigs,
 			reloadRegistry,
 			routes,
 		});
@@ -102,28 +107,29 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 };
 
 function buildTelegramEndpointConfigs(
-	chatConfigs: ResolvedTelegramChatServiceConfig[]
+	sessionConfigs: ResolvedTelegramSessionServiceConfig[]
 ): ResolvedTelegramEndpointConfig[] {
 	const groupedRoutes = new Map<
 		string,
 		Record<string, TelegramRouteTarget>
 	>();
 
-	for (const chatConfig of chatConfigs) {
-		let routes = groupedRoutes.get(chatConfig.token);
+	for (const sessionConfig of sessionConfigs) {
+		let routes = groupedRoutes.get(sessionConfig.token);
 		if (!routes) {
 			routes = {};
-			groupedRoutes.set(chatConfig.token, routes);
+			groupedRoutes.set(sessionConfig.token, routes);
 		}
 
-		if (routes[chatConfig.telegramChatId]) {
+		if (routes[sessionConfig.telegramChatId]) {
 			throw new Error(
-				`Duplicate telegram route for token ${chatConfig.token} and chat id ${chatConfig.telegramChatId}`
+				`Duplicate telegram route for token ${sessionConfig.token} and chat id ${sessionConfig.telegramChatId}`
 			);
 		}
-		routes[chatConfig.telegramChatId] = {
-			chatId: chatConfig.chatId,
-			workspace: chatConfig.workspace,
+		routes[sessionConfig.telegramChatId] = {
+			sessionId: sessionConfig.sessionId,
+			chatId: sessionConfig.chatId,
+			workspace: sessionConfig.workspace,
 		};
 	}
 
@@ -133,27 +139,33 @@ function buildTelegramEndpointConfigs(
 	}));
 }
 
-function collectServiceChatIds(params: {
-	telegramChats: ResolvedTelegramChatServiceConfig[];
-	cronChats: ResolvedCronChatServiceConfig[];
-}): string[] {
-	const chatIds: string[] = [];
-	const seenChatIds = new Set<string>();
-	for (const chatConfig of params.cronChats) {
-		if (seenChatIds.has(chatConfig.chatId)) {
+function collectServiceSessions(params: {
+	telegramSessions: ResolvedTelegramSessionServiceConfig[];
+	cronSessions: ResolvedCronSessionServiceConfig[];
+}): Array<{ sessionId: string; chatId: string }> {
+	const sessions: Array<{ sessionId: string; chatId: string }> = [];
+	const seenSessionIds = new Set<string>();
+	for (const sessionConfig of params.cronSessions) {
+		if (seenSessionIds.has(sessionConfig.sessionId)) {
 			continue;
 		}
-		seenChatIds.add(chatConfig.chatId);
-		chatIds.push(chatConfig.chatId);
+		seenSessionIds.add(sessionConfig.sessionId);
+		sessions.push({
+			sessionId: sessionConfig.sessionId,
+			chatId: sessionConfig.chatId,
+		});
 	}
-	for (const chatConfig of params.telegramChats) {
-		if (seenChatIds.has(chatConfig.chatId)) {
+	for (const sessionConfig of params.telegramSessions) {
+		if (seenSessionIds.has(sessionConfig.sessionId)) {
 			continue;
 		}
-		seenChatIds.add(chatConfig.chatId);
-		chatIds.push(chatConfig.chatId);
+		seenSessionIds.add(sessionConfig.sessionId);
+		sessions.push({
+			sessionId: sessionConfig.sessionId,
+			chatId: sessionConfig.chatId,
+		});
 	}
-	return chatIds;
+	return sessions;
 }
 
 async function stopAllServices(services: RunningServicePart[]): Promise<void> {
@@ -164,9 +176,9 @@ async function stopAllServices(services: RunningServicePart[]): Promise<void> {
 	);
 }
 
-async function disposeAllHandlers(handlers: ChatHandler[]): Promise<void> {
-	for (const handler of handlers) {
-		handler.dispose();
+async function disposeAllSessions(sessions: Session[]): Promise<void> {
+	for (const session of sessions) {
+		session.dispose();
 	}
 }
 
@@ -177,7 +189,7 @@ function unregisterAll(unregisters: Array<() => void>): void {
 }
 
 export async function runServiceCommand(
-	runtime: ChatSessionRuntime<AgentSession>,
+	runtime: SessionRuntime<AgentSession>,
 	phiConfig: PhiConfig,
 	dependencies: Partial<ServiceCommandDependencies> = {}
 ): Promise<void> {
@@ -185,47 +197,59 @@ export async function runServiceCommand(
 		...defaultServiceCommandDependencies,
 		...dependencies,
 	};
-	const telegramChats = resolvedDependencies.resolveTelegramChats(phiConfig);
-	const cronChats = resolvedDependencies.resolveCronChats(phiConfig);
-	const chatExecutor = resolvedDependencies.createChatExecutor();
+	const telegramSessions =
+		resolvedDependencies.resolveTelegramSessions(phiConfig);
+	const cronSessions = resolvedDependencies.resolveCronSessions(phiConfig);
+	const sessionExecutor = resolvedDependencies.createSessionExecutor();
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
 	const routes = resolvedDependencies.createRoutes();
-	const serviceChatIds = collectServiceChatIds({
-		telegramChats,
-		cronChats,
+	const serviceSessions = collectServiceSessions({
+		telegramSessions,
+		cronSessions,
 	});
 	log.info("service.command.starting", {
-		telegramChatCount: telegramChats.length,
-		cronChatCount: cronChats.length,
-		serviceChatCount: serviceChatIds.length,
+		telegramSessionCount: telegramSessions.length,
+		cronSessionCount: cronSessions.length,
+		serviceSessionCount: serviceSessions.length,
 	});
-	const telegramEndpointConfigs = buildTelegramEndpointConfigs(telegramChats);
+	const telegramEndpointConfigs =
+		buildTelegramEndpointConfigs(telegramSessions);
 
 	const runningServices: RunningServicePart[] = [];
-	const chatHandlers: ChatHandler[] = [];
+	const sessions: Session[] = [];
 	const unregisterHandlers: Array<() => void> = [];
 	try {
-		for (const chatId of serviceChatIds) {
-			const handler = resolvedDependencies.createChatHandler({
-				chatId,
+		for (const serviceSession of serviceSessions) {
+			const session = resolvedDependencies.createSession({
+				sessionId: serviceSession.sessionId,
+				chatId: serviceSession.chatId,
 				phiConfig,
 				runtime,
-				chatExecutor,
+				sessionExecutor,
 				routes,
 				reloadRegistry,
 			});
-			chatHandlers.push(handler);
+			sessions.push(session);
 			unregisterHandlers.push(
-				routes.registerChatHandler(chatId, handler)
+				routes.registerSession(serviceSession.sessionId, session)
 			);
 			unregisterHandlers.push(
-				reloadRegistry.register(chatId, {
-					validate: () => handler.validateReload(),
+				reloadRegistry.register(serviceSession.chatId, {
+					validate: () => session.validateReload(),
 					apply: async () => {
-						handler.invalidate();
-						return ["chat-handler"];
+						session.invalidate();
+						return ["session"];
 					},
 				})
+			);
+		}
+
+		for (const sessionConfig of cronSessions) {
+			unregisterHandlers.push(
+				routes.registerCronRoute(
+					sessionConfig.chatId,
+					sessionConfig.sessionId
+				)
 			);
 		}
 
@@ -246,27 +270,27 @@ export async function runServiceCommand(
 
 		const cronRuntime = await resolvedDependencies.startCronRuntime(
 			phiConfig,
-			cronChats,
+			cronSessions,
 			reloadRegistry,
 			routes
 		);
 		runningServices.push(cronRuntime);
 		log.info("service.cron.started", {
-			cronChatCount: cronChats.length,
+			cronSessionCount: cronSessions.length,
 		});
 		log.info("service.command.started", {
 			runningServiceCount: runningServices.length,
-			chatHandlerCount: chatHandlers.length,
+			sessionCount: sessions.length,
 		});
 	} catch (error: unknown) {
 		log.error("service.command.start_failed", {
 			err: error instanceof Error ? error : new Error(String(error)),
 			runningServiceCount: runningServices.length,
-			chatHandlerCount: chatHandlers.length,
+			sessionCount: sessions.length,
 		});
 		await stopAllServices(runningServices);
 		unregisterAll(unregisterHandlers);
-		await disposeAllHandlers(chatHandlers);
+		await disposeAllSessions(sessions);
 		throw error;
 	}
 
@@ -278,14 +302,14 @@ export async function runServiceCommand(
 		stopping = true;
 		log.info("service.command.stopping", {
 			runningServiceCount: runningServices.length,
-			chatHandlerCount: chatHandlers.length,
+			sessionCount: sessions.length,
 		});
 		await stopAllServices(runningServices);
 		unregisterAll(unregisterHandlers);
-		await disposeAllHandlers(chatHandlers);
+		await disposeAllSessions(sessions);
 		log.info("service.command.stopped", {
 			runningServiceCount: runningServices.length,
-			chatHandlerCount: chatHandlers.length,
+			sessionCount: sessions.length,
 		});
 	};
 

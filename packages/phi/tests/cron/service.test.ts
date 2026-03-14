@@ -11,7 +11,7 @@ import {
 	setPhiLoggerSettingsForTest,
 } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
-import type { ChatHandler } from "@phi/services/chat-handler";
+import type { Session } from "@phi/services/session";
 import { ServiceRoutes } from "@phi/services/routes";
 import { startCronService } from "@phi/cron/service";
 import type { PhiMessage } from "@phi/messaging/types";
@@ -69,7 +69,7 @@ function formatLocalDateTime(timestampMs: number, timezone: string): string {
 	return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
-function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
+function createSession(overrides: Partial<Session> = {}): Session {
 	return {
 		async submitInteractive(): Promise<void> {},
 		async submitCron(): Promise<PhiMessage[]> {
@@ -113,7 +113,6 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
-				"  destination: telegram",
 				"  jobs:",
 				"    - id: daily",
 				"      prompt: jobs/daily.md",
@@ -122,37 +121,36 @@ describe("startCronService", () => {
 			"utf-8"
 		);
 		const routes = new ServiceRoutes();
-		const prompts: Array<{ text: string; outboundDestination: string }> =
-			[];
-		routes.registerChatHandler(
-			"alice",
-			createChatHandler({
+		const prompts: string[] = [];
+		routes.registerSession(
+			"alice-cron",
+			createSession({
 				async submitCron(input): Promise<PhiMessage[]> {
-					prompts.push({
-						text: input.text,
-						outboundDestination: input.outboundDestination,
-					});
+					prompts.push(input.text);
 					return [{ text: "done", attachments: [] }];
 				},
 			})
 		);
+		routes.registerCronRoute("alice", "alice-cron");
 
 		const service = await startCronService({
 			phiConfig: {
 				chats: {
 					alice: {
 						workspace,
+					},
+				},
+				sessions: {
+					"alice-cron": {
+						chat: "alice",
 						agent: "main",
-						routes: {
-							telegram: {
-								id: "42",
-								token: "bot-token",
-							},
-						},
+						cron: true,
 					},
 				},
 			},
-			chatConfigs: [{ chatId: "alice", workspace }],
+			sessionConfigs: [
+				{ sessionId: "alice-cron", chatId: "alice", workspace },
+			],
 			reloadRegistry: new ChatReloadRegistry(),
 			routes,
 		});
@@ -160,60 +158,9 @@ describe("startCronService", () => {
 		await Bun.sleep(2600);
 		await service.stop();
 
-		expect(prompts).toEqual([
-			{ text: "Summarize status.", outboundDestination: "telegram" },
-		]);
+		expect(prompts).toEqual(["Summarize status."]);
 		expect(readCapturedLogs()).toContain('"event":"cron.run"');
 		expect(readCapturedLogs()).toContain('"status":"ok"');
-	});
-
-	it("fails fast when cron destination is missing", async () => {
-		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-		const workspace = createWorkspace();
-		const layout = ensureChatWorkspaceLayout(workspace);
-		const at = formatLocalDateTime(Date.now() + 2000, timezone);
-		writeFileSync(
-			join(layout.cronJobsDir, "daily.md"),
-			"Summarize status.",
-			"utf-8"
-		);
-		writeFileSync(
-			layout.configFilePath,
-			[
-				"version: 1",
-				"chat:",
-				`  timezone: ${timezone}`,
-				"cron:",
-				"  enabled: true",
-				"  jobs:",
-				"    - id: daily",
-				"      prompt: jobs/daily.md",
-				`      at: "${at}"`,
-			].join("\n"),
-			"utf-8"
-		);
-
-		await expect(
-			startCronService({
-				phiConfig: {
-					chats: {
-						alice: {
-							workspace,
-							agent: "main",
-							routes: {
-								telegram: {
-									id: "42",
-									token: "bot-token",
-								},
-							},
-						},
-					},
-				},
-				chatConfigs: [{ chatId: "alice", workspace }],
-				reloadRegistry: new ChatReloadRegistry(),
-				routes: new ServiceRoutes(),
-			})
-		).rejects.toThrow("Missing cron.destination for chat alice");
 	});
 
 	it("keeps the previous valid schedule when reload fails", async () => {
@@ -234,7 +181,6 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
-				"  destination: telegram",
 				"  jobs:",
 				"    - id: daily",
 				"      prompt: jobs/daily.md",
@@ -244,15 +190,16 @@ describe("startCronService", () => {
 		);
 		const routes = new ServiceRoutes();
 		let runCalls = 0;
-		routes.registerChatHandler(
-			"alice",
-			createChatHandler({
+		routes.registerSession(
+			"alice-cron",
+			createSession({
 				async submitCron(): Promise<PhiMessage[]> {
 					runCalls += 1;
 					return [{ text: "done", attachments: [] }];
 				},
 			})
 		);
+		routes.registerCronRoute("alice", "alice-cron");
 		const reloadRegistry = new ChatReloadRegistry();
 
 		const service = await startCronService({
@@ -260,17 +207,19 @@ describe("startCronService", () => {
 				chats: {
 					alice: {
 						workspace,
+					},
+				},
+				sessions: {
+					"alice-cron": {
+						chat: "alice",
 						agent: "main",
-						routes: {
-							telegram: {
-								id: "42",
-								token: "bot-token",
-							},
-						},
+						cron: true,
 					},
 				},
 			},
-			chatConfigs: [{ chatId: "alice", workspace }],
+			sessionConfigs: [
+				{ sessionId: "alice-cron", chatId: "alice", workspace },
+			],
 			reloadRegistry,
 			routes,
 		});
@@ -283,7 +232,6 @@ describe("startCronService", () => {
 				`  timezone: ${timezone}`,
 				"cron:",
 				"  enabled: true",
-				"  destination: telegram",
 				"  jobs:",
 				"    - id: broken",
 				"      prompt: jobs/missing.md",

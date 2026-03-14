@@ -1,22 +1,29 @@
 # Routes
 
 Routes belong to the service runtime.
+They are the routing table between external inputs, sessions, and outbound deliveries.
 
 ```text
-Message endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
-Internal triggers  ─────►
+Message endpoints  ─┐
+Cron triggers      ─┼──► Routes ───► Session
+Outbound delivery  ◄─┘
 ```
 
-## What it is
+## What it does
 
-Routes are config-driven wiring.
-They dispatch interactive messages and internal triggers to chat handlers.
-They also deliver outbound messages to configured message endpoints.
-Each turn carries exactly one outbound destination.
-They do not interpret message meaning.
+Routes map:
+- inbound endpoint route to session
+- inbound cron trigger to session
+- session to outbound delivery
 
-Route availability comes from config, not from incidental runtime order.
+Routes do not own session history.
+Routes do not interpret message meaning.
 
-## Chat relation
+## Runtime relation
 
-A service chat is the config-bound composition of routes, chat handlers, workspace state, and one agent-facing identity.
+The runtime owns routes and updates them when chats, sessions, endpoints, and cron bindings are created or removed.
+
+## Reply flow
+
+The normal reply path is route-local.
+A turn replies through the route bound to its session.

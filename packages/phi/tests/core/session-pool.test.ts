@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { ChatSessionPool, type DisposableSession } from "@phi/core/chat-pool";
+import { SessionPool, type DisposableSession } from "@phi/core/session-pool";
 
 class TestSession implements DisposableSession {
 	public disposed = false;
@@ -12,10 +12,10 @@ class TestSession implements DisposableSession {
 	}
 }
 
-describe("ChatSessionPool", () => {
+describe("SessionPool", () => {
 	it("recreates a session after invalidation", async () => {
 		let nextId = 0;
-		const pool = new ChatSessionPool(async () => new TestSession(++nextId));
+		const pool = new SessionPool(async () => new TestSession(++nextId));
 
 		const first = await pool.getOrCreateSession("alice");
 		pool.invalidateSession("alice");

@@ -1,8 +1,7 @@
 import { getPhiLogger } from "@phi/core/logger";
-import {
-	resolveEnabledChatRouteKeys,
-	type PhiConfig,
-	type ResolvedCronChatServiceConfig,
+import type {
+	PhiConfig,
+	ResolvedCronSessionServiceConfig,
 } from "@phi/core/config";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import {
@@ -11,14 +10,13 @@ import {
 } from "@phi/core/chat-workspace";
 import {
 	loadPhiWorkspaceConfig,
-	resolveWorkspaceCronDestination,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
 import { computeCronJobNextRunAtMs } from "@phi/cron/schedule";
 import { appendCronRunLog, loadCronJobs } from "@phi/cron/store";
 import type { CronReloadResult, LoadedCronJob } from "@phi/cron/types";
 import type { PhiMessage } from "@phi/messaging/types";
-import type { ChatHandlerCronInput, ServiceRoutes } from "@phi/services/routes";
+import type { CronInput, ServiceRoutes } from "@phi/services/routes";
 
 const log = getPhiLogger("cron");
 
@@ -28,10 +26,7 @@ export interface RunningCronService {
 }
 
 export interface CronServiceDependencies {
-	dispatchTrigger(
-		chatId: string,
-		input: ChatHandlerCronInput
-	): Promise<PhiMessage[]>;
+	dispatchTrigger(chatId: string, input: CronInput): Promise<PhiMessage[]>;
 }
 
 function buildCronLogText(outboundMessages: PhiMessage[]): string {
@@ -49,43 +44,26 @@ function buildCronLogText(outboundMessages: PhiMessage[]): string {
 		.trim();
 }
 
-function assertCronDestinationConfigured(params: {
-	phiConfig: PhiConfig;
-	chatId: string;
-	outboundDestination: string;
-}): void {
-	const routeKeys = resolveEnabledChatRouteKeys(
-		params.phiConfig,
-		params.chatId
-	);
-	if (routeKeys.includes(params.outboundDestination)) {
-		return;
-	}
-	throw new Error(
-		`Invalid cron.destination for chat ${params.chatId}: ${params.outboundDestination}`
-	);
-}
-
-class ChatCronScheduler {
+class SessionCronScheduler {
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private jobs: LoadedCronJob[] = [];
 	private timezone: string | undefined;
-	private outboundDestination: string | undefined;
 	private readonly runningJobs = new Set<string>();
 
 	public constructor(
-		private readonly phiConfig: PhiConfig,
-		private readonly chatConfig: ResolvedCronChatServiceConfig,
+		private readonly sessionConfig: ResolvedCronSessionServiceConfig,
 		private readonly dependencies: CronServiceDependencies
 	) {}
 
 	public async start(): Promise<void> {
 		log.info("cron.scheduler.starting", {
-			chatId: this.chatConfig.chatId,
+			chatId: this.sessionConfig.chatId,
+			sessionId: this.sessionConfig.sessionId,
 		});
 		await this.reload();
 		log.info("cron.scheduler.started", {
-			chatId: this.chatConfig.chatId,
+			chatId: this.sessionConfig.chatId,
+			sessionId: this.sessionConfig.sessionId,
 			jobCount: this.jobs.length,
 		});
 	}
@@ -96,7 +74,8 @@ class ChatCronScheduler {
 			this.timer = undefined;
 		}
 		log.info("cron.scheduler.stopped", {
-			chatId: this.chatConfig.chatId,
+			chatId: this.sessionConfig.chatId,
+			sessionId: this.sessionConfig.sessionId,
 		});
 	}
 
@@ -109,15 +88,14 @@ class ChatCronScheduler {
 		const previousJobs = this.jobs;
 		const previousTimer = this.timer;
 		const previousTimezone = this.timezone;
-		const previousOutboundDestination = this.outboundDestination;
 		log.debug("cron.scheduler.reload_started", {
-			chatId: this.chatConfig.chatId,
+			chatId: this.sessionConfig.chatId,
+			sessionId: this.sessionConfig.sessionId,
 		});
 
 		try {
 			const state = this.loadValidatedState();
 			this.timezone = state.timezone;
-			this.outboundDestination = state.outboundDestination;
 			this.jobs = state.jobs;
 			if (previousTimer) {
 				clearTimeout(previousTimer);
@@ -127,7 +105,8 @@ class ChatCronScheduler {
 
 			const result = this.buildReloadResult(this.jobs);
 			log.debug("cron.scheduler.reload_completed", {
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
+				sessionId: this.sessionConfig.sessionId,
 				jobCount: result.jobCount,
 				nextRunAtMs: result.nextRunAtMs,
 			});
@@ -136,9 +115,9 @@ class ChatCronScheduler {
 			this.jobs = previousJobs;
 			this.timer = previousTimer;
 			this.timezone = previousTimezone;
-			this.outboundDestination = previousOutboundDestination;
 			log.error("cron.scheduler.reload_failed", {
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
+				sessionId: this.sessionConfig.sessionId,
 				err: error instanceof Error ? error : new Error(String(error)),
 			});
 			throw error;
@@ -147,19 +126,14 @@ class ChatCronScheduler {
 
 	private loadValidatedState(): {
 		timezone: string | undefined;
-		outboundDestination: string | undefined;
 		jobs: LoadedCronJob[];
 	} {
 		const workspaceDir = resolveChatWorkspaceDirectory(
-			this.chatConfig.workspace
+			this.sessionConfig.workspace
 		);
 		const layout = ensureChatWorkspaceLayout(workspaceDir);
 		const workspaceConfig = loadPhiWorkspaceConfig(layout.configFilePath);
 		const timezone = resolveWorkspaceTimezone(
-			workspaceConfig,
-			layout.configFilePath
-		);
-		const outboundDestination = resolveWorkspaceCronDestination(
 			workspaceConfig,
 			layout.configFilePath
 		);
@@ -169,24 +143,11 @@ class ChatCronScheduler {
 		});
 		if (loadedJobs.length > 0 && !timezone) {
 			throw new Error(
-				`Missing chat.timezone for cron chat ${this.chatConfig.chatId}`
+				`Missing chat.timezone for cron chat ${this.sessionConfig.chatId}`
 			);
-		}
-		if (loadedJobs.length > 0 && !outboundDestination) {
-			throw new Error(
-				`Missing cron.destination for chat ${this.chatConfig.chatId}`
-			);
-		}
-		if (outboundDestination) {
-			assertCronDestinationConfigured({
-				phiConfig: this.phiConfig,
-				chatId: this.chatConfig.chatId,
-				outboundDestination,
-			});
 		}
 		return {
 			timezone,
-			outboundDestination,
 			jobs: loadedJobs.map((job) => ({
 				...job,
 				nextRunAtMs: this.computeNextRunAtMs(job, timezone),
@@ -276,28 +237,23 @@ class ChatCronScheduler {
 	}
 
 	private async runJob(job: LoadedCronJob): Promise<void> {
-		const outboundDestination = this.outboundDestination;
-		if (!outboundDestination) {
-			throw new Error(
-				`Missing cron.destination for chat ${this.chatConfig.chatId}`
-			);
-		}
 		const startedAtDate = new Date();
 		const startedAt = startedAtDate.toISOString();
 		const startedAtMs = startedAtDate.getTime();
 		log.info("cron.job.started", {
-			chatId: this.chatConfig.chatId,
+			chatId: this.sessionConfig.chatId,
+			sessionId: this.sessionConfig.sessionId,
 			jobId: job.id,
 			promptPath: job.prompt,
 		});
 
 		try {
 			const outboundMessages = await this.dependencies.dispatchTrigger(
-				this.chatConfig.chatId,
-				{ text: job.promptText, outboundDestination }
+				this.sessionConfig.chatId,
+				{ text: job.promptText }
 			);
 			appendCronRunLog({
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
 				jobId: job.id,
 				status: "ok",
 				text: buildCronLogText(outboundMessages),
@@ -305,7 +261,8 @@ class ChatCronScheduler {
 				finishedAt: new Date().toISOString(),
 			});
 			log.info("cron.job.completed", {
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
+				sessionId: this.sessionConfig.sessionId,
 				jobId: job.id,
 				outboundMessageCount: outboundMessages.length,
 				durationMs: Date.now() - startedAtMs,
@@ -314,7 +271,7 @@ class ChatCronScheduler {
 			const message =
 				error instanceof Error ? error.message : String(error);
 			appendCronRunLog({
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
 				jobId: job.id,
 				status: "error",
 				error: message,
@@ -322,7 +279,8 @@ class ChatCronScheduler {
 				finishedAt: new Date().toISOString(),
 			});
 			log.error("cron.job.failed", {
-				chatId: this.chatConfig.chatId,
+				chatId: this.sessionConfig.chatId,
+				sessionId: this.sessionConfig.sessionId,
 				jobId: job.id,
 				durationMs: Date.now() - startedAtMs,
 				err: error instanceof Error ? error : new Error(String(error)),
@@ -334,21 +292,19 @@ class ChatCronScheduler {
 export async function startCronService(params: {
 	phiConfig: PhiConfig;
 	reloadRegistry: ChatReloadRegistry;
-	chatConfigs: ResolvedCronChatServiceConfig[];
+	sessionConfigs: ResolvedCronSessionServiceConfig[];
 	routes: ServiceRoutes;
 	dependencies?: CronServiceDependencies;
 }): Promise<RunningCronService> {
 	const dependencies =
 		params.dependencies ??
 		({
-			dispatchTrigger: async (
-				chatId: string,
-				input: ChatHandlerCronInput
-			) => await params.routes.dispatchCron(chatId, input),
+			dispatchTrigger: async (chatId: string, input: CronInput) =>
+				await params.routes.dispatchCron(chatId, input),
 		} satisfies CronServiceDependencies);
-	const schedulers = new Map<string, ChatCronScheduler>();
+	const schedulers = new Map<string, SessionCronScheduler>();
 	log.info("cron.service.starting", {
-		chatCount: params.chatConfigs.length,
+		sessionCount: params.sessionConfigs.length,
 	});
 	const unregisterHandlers: Array<() => void> = [];
 	let stopped = false;
@@ -357,16 +313,12 @@ export async function startCronService(params: {
 		resolveDone = resolve;
 	});
 
-	for (const chatConfig of params.chatConfigs) {
-		const scheduler = new ChatCronScheduler(
-			params.phiConfig,
-			chatConfig,
-			dependencies
-		);
+	for (const sessionConfig of params.sessionConfigs) {
+		const scheduler = new SessionCronScheduler(sessionConfig, dependencies);
 		await scheduler.start();
-		schedulers.set(chatConfig.chatId, scheduler);
+		schedulers.set(sessionConfig.sessionId, scheduler);
 		unregisterHandlers.push(
-			params.reloadRegistry.register(chatConfig.chatId, {
+			params.reloadRegistry.register(sessionConfig.chatId, {
 				validate: async () => {
 					const result = await scheduler.validate();
 					return [`cron:${String(result.jobCount)}`];
@@ -379,7 +331,7 @@ export async function startCronService(params: {
 		);
 	}
 	log.info("cron.service.started", {
-		chatCount: params.chatConfigs.length,
+		sessionCount: params.sessionConfigs.length,
 	});
 
 	return {
@@ -390,7 +342,7 @@ export async function startCronService(params: {
 			}
 			stopped = true;
 			log.info("cron.service.stopping", {
-				chatCount: params.chatConfigs.length,
+				sessionCount: params.sessionConfigs.length,
 			});
 			for (const unregister of unregisterHandlers) {
 				unregister();
@@ -400,7 +352,7 @@ export async function startCronService(params: {
 			}
 			resolveDone?.();
 			log.info("cron.service.stopped", {
-				chatCount: params.chatConfigs.length,
+				sessionCount: params.sessionConfigs.length,
 			});
 		},
 	};

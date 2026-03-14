@@ -85,16 +85,6 @@ function resolveCurrentTurnReminderBlock(
 	return extractIndentedBlock(reminderText, marker, indent);
 }
 
-export function resolveOutboundDestinationFromCurrentTurn(
-	ctx: ExtensionContext
-): string | undefined {
-	const phiBlock = resolveCurrentTurnReminderBlock(ctx, "phi:\n", "  ");
-	if (!phiBlock) {
-		return undefined;
-	}
-	return matchValue(phiBlock, "^  outboundDestination: (.+)$");
-}
-
 export function resolveSenderMentionFromCurrentTurn(
 	ctx: ExtensionContext
 ): PhiMessageMention | undefined {

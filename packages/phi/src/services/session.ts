@@ -5,23 +5,18 @@ import type {
 	ImageContent,
 	TextContent,
 } from "@mariozechner/pi-ai";
-import {
-	SessionManager,
-	type AgentSession,
-	type AgentSessionEvent,
-	type ExtensionFactory,
+import type {
+	AgentSession,
+	AgentSessionEvent,
+	ExtensionFactory,
 } from "@mariozechner/pi-coding-agent";
 
-import type { ChatExecutor } from "@phi/core/chat-executor";
+import type { SessionExecutor } from "@phi/core/session-executor";
 import type { PhiConfig } from "@phi/core/config";
 import type { ChatReloadRegistry } from "@phi/core/reload";
 import { getPhiLogger } from "@phi/core/logger";
 import { sanitizeInboundText } from "@phi/core/message-text";
-import { isRecord } from "@phi/core/type-guards";
-import {
-	createPhiAgentSession,
-	type ChatSessionRuntime,
-} from "@phi/core/runtime";
+import { createPhiAgentSession, type SessionRuntime } from "@phi/core/runtime";
 import { createPhiMessagingExtension } from "@phi/extensions/messaging";
 import {
 	appendPhiSystemReminderToUserContent,
@@ -29,14 +24,14 @@ import {
 } from "@phi/messaging/system-reminder";
 import type { PhiMessage } from "@phi/messaging/types";
 import type {
-	ChatHandlerCronInput,
-	ChatHandlerInteractiveAttachment,
-	ChatHandlerInteractiveInput,
+	CronInput,
+	InteractiveAttachment,
+	InteractiveInput,
 	ServiceRoutes,
 } from "@phi/services/routes";
 
 const TYPING_INTERVAL_MS = 2500;
-const log = getPhiLogger("chat-handler");
+const log = getPhiLogger("session");
 
 const EMPTY_USAGE = {
 	input: 0,
@@ -148,9 +143,7 @@ function sanitizeInboundTextOrThrow(text: string): string {
 	return result.message;
 }
 
-function buildInteractiveAttachmentText(
-	attachments: ChatHandlerInteractiveAttachment[]
-): string[] {
+function buildAttachmentText(attachments: InteractiveAttachment[]): string[] {
 	if (attachments.length === 0) {
 		return [];
 	}
@@ -160,42 +153,38 @@ function buildInteractiveAttachmentText(
 	];
 }
 
-function resolveInteractiveAttachmentMimeType(
-	attachment: ChatHandlerInteractiveAttachment
+function resolveAttachmentMimeType(
+	attachment: InteractiveAttachment
 ): string | undefined {
 	return attachment.mimeType ?? Bun.file(attachment.path).type ?? undefined;
 }
 
-function isInteractiveImageAttachment(
-	attachment: ChatHandlerInteractiveAttachment
-): boolean {
-	const mimeType = resolveInteractiveAttachmentMimeType(attachment);
+function isImageAttachment(attachment: InteractiveAttachment): boolean {
+	const mimeType = resolveAttachmentMimeType(attachment);
 	return typeof mimeType === "string" && mimeType.startsWith("image/");
 }
 
-function buildInteractiveInputText(input: ChatHandlerInteractiveInput): string {
+function buildInteractiveInputText(input: InteractiveInput): string {
 	const lines: string[] = [];
 	const normalizedText = input.text?.trim();
 	if (normalizedText) {
 		lines.push(normalizedText);
 	}
 	const imageCount = input.attachments.filter((attachment) =>
-		isInteractiveImageAttachment(attachment)
+		isImageAttachment(attachment)
 	).length;
 	if (imageCount > 0) {
 		lines.push(`User sent ${String(imageCount)} image attachment(s).`);
 	}
-	lines.push(...buildInteractiveAttachmentText(input.attachments));
+	lines.push(...buildAttachmentText(input.attachments));
 	if (lines.length === 0) {
 		throw new Error("Inbound message has no supported content.");
 	}
 	return lines.join("\n\n");
 }
 
-function createImageContent(
-	attachment: ChatHandlerInteractiveAttachment
-): ImageContent {
-	const mimeType = resolveInteractiveAttachmentMimeType(attachment);
+function createImageContent(attachment: InteractiveAttachment): ImageContent {
+	const mimeType = resolveAttachmentMimeType(attachment);
 	if (!mimeType || !mimeType.startsWith("image/")) {
 		throw new Error(`Attachment is not an image: ${attachment.path}`);
 	}
@@ -206,25 +195,10 @@ function createImageContent(
 	};
 }
 
-function buildInteractiveMetadata(
-	input: ChatHandlerInteractiveInput
-): Record<string, unknown> {
-	const existingPhiMetadata = isRecord(input.metadata?.phi)
-		? input.metadata.phi
-		: {};
-	return {
-		...(input.metadata ?? {}),
-		phi: {
-			...existingPhiMetadata,
-			outboundDestination: input.outboundDestination,
-		},
-	};
-}
-
 function buildInteractiveAgentContent(
-	input: ChatHandlerInteractiveInput
+	input: InteractiveInput
 ): string | (TextContent | ImageContent)[] {
-	const reminder = buildPhiSystemReminder(buildInteractiveMetadata(input));
+	const reminder = buildPhiSystemReminder(input.metadata);
 	if (input.attachments.length === 0) {
 		const normalizedText = input.text?.trim();
 		if (!normalizedText) {
@@ -239,7 +213,7 @@ function buildInteractiveAgentContent(
 		buildInteractiveInputText(input)
 	);
 	const imageContents = input.attachments
-		.filter((attachment) => isInteractiveImageAttachment(attachment))
+		.filter((attachment) => isImageAttachment(attachment))
 		.map((attachment) => createImageContent(attachment));
 	if (imageContents.length === 0) {
 		return appendPhiSystemReminderToUserContent(sanitizedText, reminder);
@@ -250,7 +224,7 @@ function buildInteractiveAgentContent(
 	);
 }
 
-function buildCronAgentContent(input: ChatHandlerCronInput): string {
+function buildCronAgentContent(input: CronInput): string {
 	const text = input.text.trim();
 	if (!text) {
 		throw new Error("Cron trigger has no content.");
@@ -273,8 +247,8 @@ class InteractiveSession {
 	private readonly pendingSubmissions: PendingSubmit[] = [];
 
 	public constructor(
-		private readonly runtime: ChatSessionRuntime<AgentSession>,
-		private readonly chatId: string
+		private readonly runtime: SessionRuntime<AgentSession>,
+		private readonly sessionId: string
 	) {}
 
 	public async submit(params: InteractiveSessionSubmitParams): Promise<void> {
@@ -287,8 +261,8 @@ class InteractiveSession {
 			this.pendingSubmissions.push(submit);
 			submit.typingNotifier.notify();
 			if (session.isStreaming) {
-				log.debug("chat-handler.interactive.steer", {
-					chatId: this.chatId,
+				log.debug("session.interactive.steer", {
+					sessionId: this.sessionId,
 					pendingSubmitCount: this.pendingSubmissions.length,
 				});
 				sendPromise = session.sendUserMessage(params.content, {
@@ -296,15 +270,15 @@ class InteractiveSession {
 				});
 				return;
 			}
-			log.debug("chat-handler.interactive.submit", {
-				chatId: this.chatId,
+			log.debug("session.interactive.submit", {
+				sessionId: this.sessionId,
 				pendingSubmitCount: this.pendingSubmissions.length,
 			});
 			sendPromise = session.sendUserMessage(params.content);
 		});
 
 		if (!session || !sendPromise) {
-			throw new Error(`Chat session ${this.chatId} was not prepared.`);
+			throw new Error(`Session ${this.sessionId} was not prepared.`);
 		}
 
 		try {
@@ -318,7 +292,7 @@ class InteractiveSession {
 
 	public invalidate(): void {
 		this.detachSession();
-		this.runtime.disposeSession(this.chatId);
+		this.runtime.disposeSession(this.sessionId);
 	}
 
 	public dispose(): void {
@@ -327,7 +301,7 @@ class InteractiveSession {
 	}
 
 	private async getOrCreateSession(): Promise<AgentSession> {
-		const session = await this.runtime.getOrCreateSession(this.chatId);
+		const session = await this.runtime.getOrCreateSession(this.sessionId);
 		if (session === this.session) {
 			return session;
 		}
@@ -437,30 +411,20 @@ function createAssistantErrorMessage(
 }
 
 function createInteractiveMessagingExtensionFactories(
-	chatId: string,
+	sessionId: string,
 	routes: ServiceRoutes
 ): ExtensionFactory[] {
 	return [
 		createPhiMessagingExtension({
-			deliverMessage: async (message, _phase, outboundDestination) => {
-				if (!outboundDestination) {
-					throw new Error(
-						`Missing outbound destination for interactive chat ${chatId}`
-					);
-				}
-				await routes.deliverOutbound(
-					chatId,
-					message,
-					outboundDestination
-				);
+			deliverMessage: async (message) => {
+				await routes.deliverOutbound(sessionId, message);
 			},
 		}),
 	];
 }
 
 function createCronMessagingExtensionFactories(params: {
-	chatId: string;
-	outboundDestination: string;
+	sessionId: string;
 	routes: ServiceRoutes;
 	outboundMessages: PhiMessage[];
 }): ExtensionFactory[] {
@@ -469,9 +433,8 @@ function createCronMessagingExtensionFactories(params: {
 			deliverMessage: async (message, phase) => {
 				if (phase === "instant") {
 					await params.routes.deliverOutbound(
-						params.chatId,
-						message,
-						params.outboundDestination
+						params.sessionId,
+						message
 					);
 					return;
 				}
@@ -481,42 +444,43 @@ function createCronMessagingExtensionFactories(params: {
 	];
 }
 
-export interface ChatHandler {
-	submitInteractive(input: ChatHandlerInteractiveInput): Promise<void>;
-	submitCron(input: ChatHandlerCronInput): Promise<PhiMessage[]>;
+export interface Session {
+	submitInteractive(input: InteractiveInput): Promise<void>;
+	submitCron(input: CronInput): Promise<PhiMessage[]>;
 	validateReload(): Promise<string[]>;
 	invalidate(): void;
 	dispose(): void;
 }
 
-export interface PiChatHandlerDependencies {
+export interface PiSessionRuntimeDependencies {
 	createCronSession?: typeof createPhiAgentSession;
 	createValidationSession?: typeof createPhiAgentSession;
 }
 
-export interface CreatePiChatHandlerParams {
+export interface CreatePiSessionRuntimeParams {
+	sessionId: string;
 	chatId: string;
 	phiConfig: PhiConfig;
-	runtime: ChatSessionRuntime<AgentSession>;
-	chatExecutor: ChatExecutor;
+	runtime: SessionRuntime<AgentSession>;
+	sessionExecutor: SessionExecutor;
 	routes: ServiceRoutes;
 	reloadRegistry: ChatReloadRegistry;
-	dependencies?: PiChatHandlerDependencies;
+	dependencies?: PiSessionRuntimeDependencies;
 }
 
 export function createServiceSessionExtensionFactories(
-	chatId: string,
+	sessionId: string,
 	routes: ServiceRoutes
 ): ExtensionFactory[] {
-	return createInteractiveMessagingExtensionFactories(chatId, routes);
+	return createInteractiveMessagingExtensionFactories(sessionId, routes);
 }
 
-export class PiChatHandler implements ChatHandler {
+export class PiSessionRuntime implements Session {
 	private readonly interactiveSession: InteractiveSession;
 	private readonly createCronSession: typeof createPhiAgentSession;
 	private readonly createValidationSession: typeof createPhiAgentSession;
 
-	public constructor(private readonly params: CreatePiChatHandlerParams) {
+	public constructor(private readonly params: CreatePiSessionRuntimeParams) {
 		this.createCronSession =
 			params.dependencies?.createCronSession ?? createPhiAgentSession;
 		this.createValidationSession =
@@ -524,13 +488,11 @@ export class PiChatHandler implements ChatHandler {
 			createPhiAgentSession;
 		this.interactiveSession = new InteractiveSession(
 			params.runtime,
-			params.chatId
+			params.sessionId
 		);
 	}
 
-	public async submitInteractive(
-		input: ChatHandlerInteractiveInput
-	): Promise<void> {
+	public async submitInteractive(input: InteractiveInput): Promise<void> {
 		try {
 			await this.interactiveSession.submit({
 				content: buildInteractiveAgentContent(input),
@@ -543,18 +505,15 @@ export class PiChatHandler implements ChatHandler {
 		await this.params.reloadRegistry.applyPending(this.params.chatId);
 	}
 
-	public async submitCron(
-		input: ChatHandlerCronInput
-	): Promise<PhiMessage[]> {
+	public async submitCron(input: CronInput): Promise<PhiMessage[]> {
 		const outboundMessages: PhiMessage[] = [];
 		const session = await this.createCronSession(
-			this.params.chatId,
+			this.params.sessionId,
 			this.params.phiConfig,
 			{
-				sessionManager: SessionManager.inMemory(),
+				persistSession: false,
 				extensionFactories: createCronMessagingExtensionFactories({
-					chatId: this.params.chatId,
-					outboundDestination: input.outboundDestination,
+					sessionId: this.params.sessionId,
 					routes: this.params.routes,
 					outboundMessages,
 				}),
@@ -563,16 +522,11 @@ export class PiChatHandler implements ChatHandler {
 
 		try {
 			await session.sendUserMessage(buildCronAgentContent(input));
-			await this.publishCronResult(
-				session,
-				outboundMessages,
-				input.outboundDestination
-			);
+			await this.publishCronResult(session, outboundMessages);
 			return outboundMessages;
 		} catch (error: unknown) {
 			await this.publishCronError(
-				error instanceof Error ? error.message : String(error),
-				input.outboundDestination
+				error instanceof Error ? error.message : String(error)
 			);
 			throw error;
 		} finally {
@@ -582,14 +536,14 @@ export class PiChatHandler implements ChatHandler {
 
 	public async validateReload(): Promise<string[]> {
 		const session = await this.createValidationSession(
-			this.params.chatId,
+			this.params.sessionId,
 			this.params.phiConfig,
 			{
-				sessionManager: SessionManager.inMemory(),
+				persistSession: false,
 			}
 		);
 		try {
-			return ["chat-handler"];
+			return ["session"];
 		} finally {
 			session.dispose();
 		}
@@ -605,62 +559,62 @@ export class PiChatHandler implements ChatHandler {
 
 	private async publishCronResult(
 		session: AgentSession,
-		outboundMessages: PhiMessage[],
-		outboundDestination: string
+		outboundMessages: PhiMessage[]
 	): Promise<void> {
 		const assistantMessage = createPublishedAssistantMessage(
 			getLastAssistantMessage(session),
 			resolvePublishedAssistantText(outboundMessages)
 		);
-		await this.params.chatExecutor.run(this.params.chatId, async () => {
-			if (assistantMessage) {
-				const persistentSession =
-					await this.params.runtime.getOrCreateSession(
-						this.params.chatId
+		await this.params.sessionExecutor.run(
+			this.params.sessionId,
+			async () => {
+				if (assistantMessage) {
+					const persistentSession =
+						await this.params.runtime.getOrCreateSession(
+							this.params.sessionId
+						);
+					persistentSession.sessionManager.appendMessage(
+						assistantMessage
 					);
-				persistentSession.sessionManager.appendMessage(
-					assistantMessage
-				);
-				persistentSession.agent.replaceMessages(
-					persistentSession.sessionManager.buildSessionContext()
-						.messages
-				);
+					persistentSession.agent.replaceMessages(
+						persistentSession.sessionManager.buildSessionContext()
+							.messages
+					);
+				}
+				for (const message of outboundMessages) {
+					await this.params.routes.deliverOutbound(
+						this.params.sessionId,
+						message
+					);
+				}
 			}
-			for (const message of outboundMessages) {
-				await this.params.routes.deliverOutbound(
-					this.params.chatId,
-					message,
-					outboundDestination
-				);
-			}
-		});
+		);
 	}
 
-	private async publishCronError(
-		message: string,
-		outboundDestination: string
-	): Promise<void> {
+	private async publishCronError(message: string): Promise<void> {
 		const errorText = `Cron job failed: ${message}`;
-		await this.params.chatExecutor.run(this.params.chatId, async () => {
-			const session = await this.params.runtime.getOrCreateSession(
-				this.params.chatId
-			);
-			const assistantMessage = createAssistantErrorMessage(
-				session,
-				errorText
-			);
-			session.sessionManager.appendMessage(assistantMessage);
-			session.agent.replaceMessages(
-				session.sessionManager.buildSessionContext().messages
-			);
-			await this.params.routes.deliverOutbound(
-				this.params.chatId,
-				{
-					text: errorText,
-					attachments: [],
-				},
-				outboundDestination
-			);
-		});
+		await this.params.sessionExecutor.run(
+			this.params.sessionId,
+			async () => {
+				const session = await this.params.runtime.getOrCreateSession(
+					this.params.sessionId
+				);
+				const assistantMessage = createAssistantErrorMessage(
+					session,
+					errorText
+				);
+				session.sessionManager.appendMessage(assistantMessage);
+				session.agent.replaceMessages(
+					session.sessionManager.buildSessionContext().messages
+				);
+				await this.params.routes.deliverOutbound(
+					this.params.sessionId,
+					{
+						text: errorText,
+						attachments: [],
+					}
+				);
+			}
+		);
 	}
 }

@@ -6,14 +6,13 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	loadPhiWorkspaceConfig,
-	resolveWorkspaceCronDestination,
 	resolveWorkspaceCronJobDefinitions,
 	resolveWorkspaceSkillEnvOverrides,
 	resolveWorkspaceTimezone,
 } from "@phi/core/workspace-config";
 
 describe("workspace config", () => {
-	it("loads timezone cron destination and cron jobs from workspace config", () => {
+	it("loads timezone and cron jobs from workspace config", () => {
 		const root = mkdtempSync(join(tmpdir(), "phi-workspace-config-"));
 		const configFilePath = join(root, "config.yaml");
 
@@ -26,7 +25,6 @@ describe("workspace config", () => {
 					"  timezone: Asia/Shanghai",
 					"cron:",
 					"  enabled: true",
-					"  destination: telegram",
 					"  jobs:",
 					"    - id: daily",
 					"      prompt: jobs/daily.md",
@@ -45,9 +43,6 @@ describe("workspace config", () => {
 				"Asia/Shanghai"
 			);
 			expect(
-				resolveWorkspaceCronDestination(config, configFilePath)
-			).toBe("telegram");
-			expect(
 				resolveWorkspaceCronJobDefinitions(config, configFilePath)
 			).toEqual([
 				{
@@ -63,33 +58,6 @@ describe("workspace config", () => {
 					EXAMPLE_API_KEY: "test-key",
 				},
 			});
-		} finally {
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	it("fails when cron.destination is empty", () => {
-		const root = mkdtempSync(join(tmpdir(), "phi-workspace-config-"));
-		const configFilePath = join(root, "config.yaml");
-
-		try {
-			writeFileSync(
-				configFilePath,
-				[
-					"version: 1",
-					"cron:",
-					"  enabled: true",
-					"  destination: ''",
-				].join("\n"),
-				"utf-8"
-			);
-
-			const config = loadPhiWorkspaceConfig(configFilePath);
-			expect(() =>
-				resolveWorkspaceCronDestination(config, configFilePath)
-			).toThrow(
-				"Invalid workspace config: cron.destination must be a non-empty string"
-			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}

@@ -32,6 +32,7 @@ const DEDUP_MAX_SIZE = 10000;
 const log = getPhiLogger("telegram-provider");
 
 export interface TelegramRouteTarget {
+	sessionId: string;
 	chatId: string;
 	workspace: string;
 }

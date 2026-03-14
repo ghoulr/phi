@@ -1,26 +1,24 @@
 import type { PhiMessage } from "@phi/messaging/types";
-import type { ChatHandler } from "@phi/services/chat-handler";
+import type { Session } from "@phi/services/session";
 
-export interface ChatHandlerInteractiveAttachment {
+export interface InteractiveAttachment {
 	path: string;
 	name: string;
 	mimeType?: string;
 }
 
-export interface ChatHandlerInteractiveInput {
+export interface InteractiveInput {
 	text?: string;
-	attachments: ChatHandlerInteractiveAttachment[];
-	outboundDestination: string;
+	attachments: InteractiveAttachment[];
 	metadata?: Record<string, unknown>;
 	sendTyping(): Promise<unknown>;
 }
 
-export interface ChatHandlerCronInput {
+export interface CronInput {
 	text: string;
-	outboundDestination: string;
 }
 
-export interface ChatDeliveryRoute {
+export interface SessionDelivery {
 	deliver(message: PhiMessage): Promise<void>;
 }
 
@@ -32,25 +30,22 @@ function createInteractiveRouteKey(
 }
 
 export class ServiceRoutes {
-	private readonly chatHandlers = new Map<string, ChatHandler>();
+	private readonly sessions = new Map<string, Session>();
 	private readonly interactiveRoutes = new Map<string, string>();
-	private readonly outboundRoutes = new Map<
-		string,
-		Map<string, ChatDeliveryRoute>
-	>();
+	private readonly cronRoutes = new Map<string, string>();
+	private readonly outboundRoutes = new Map<string, SessionDelivery>();
 
-	public registerChatHandler(
-		chatId: string,
-		handler: ChatHandler
-	): () => void {
-		const existingHandler = this.chatHandlers.get(chatId);
-		if (existingHandler && existingHandler !== handler) {
-			throw new Error(`Duplicate chat handler for chat ${chatId}`);
+	public registerSession(sessionId: string, session: Session): () => void {
+		const existingSession = this.sessions.get(sessionId);
+		if (existingSession && existingSession !== session) {
+			throw new Error(
+				`Duplicate session runtime for session ${sessionId}`
+			);
 		}
-		this.chatHandlers.set(chatId, handler);
+		this.sessions.set(sessionId, session);
 		return () => {
-			if (this.chatHandlers.get(chatId) === handler) {
-				this.chatHandlers.delete(chatId);
+			if (this.sessions.get(sessionId) === session) {
+				this.sessions.delete(sessionId);
 			}
 		};
 	}
@@ -58,49 +53,50 @@ export class ServiceRoutes {
 	public registerInteractiveRoute(
 		endpointId: string,
 		routeId: string,
-		chatId: string
+		sessionId: string
 	): () => void {
 		const routeKey = createInteractiveRouteKey(endpointId, routeId);
-		const existingChatId = this.interactiveRoutes.get(routeKey);
-		if (existingChatId && existingChatId !== chatId) {
+		const existingSessionId = this.interactiveRoutes.get(routeKey);
+		if (existingSessionId && existingSessionId !== sessionId) {
 			throw new Error(
 				`Duplicate interactive route for endpoint ${endpointId} and route ${routeId}`
 			);
 		}
-		this.interactiveRoutes.set(routeKey, chatId);
+		this.interactiveRoutes.set(routeKey, sessionId);
 		return () => {
-			if (this.interactiveRoutes.get(routeKey) === chatId) {
+			if (this.interactiveRoutes.get(routeKey) === sessionId) {
 				this.interactiveRoutes.delete(routeKey);
 			}
 		};
 	}
 
+	public registerCronRoute(chatId: string, sessionId: string): () => void {
+		const existingSessionId = this.cronRoutes.get(chatId);
+		if (existingSessionId && existingSessionId !== sessionId) {
+			throw new Error(`Duplicate cron route for chat ${chatId}`);
+		}
+		this.cronRoutes.set(chatId, sessionId);
+		return () => {
+			if (this.cronRoutes.get(chatId) === sessionId) {
+				this.cronRoutes.delete(chatId);
+			}
+		};
+	}
+
 	public registerOutboundRoute(
-		chatId: string,
-		outboundDestination: string,
-		delivery: ChatDeliveryRoute
+		sessionId: string,
+		delivery: SessionDelivery
 	): () => void {
-		const destinations =
-			this.outboundRoutes.get(chatId) ??
-			new Map<string, ChatDeliveryRoute>();
-		const existingDelivery = destinations.get(outboundDestination);
+		const existingDelivery = this.outboundRoutes.get(sessionId);
 		if (existingDelivery) {
 			throw new Error(
-				`Duplicate outbound route for chat ${chatId} and destination ${outboundDestination}`
+				`Duplicate outbound route for session ${sessionId}`
 			);
 		}
-		destinations.set(outboundDestination, delivery);
-		this.outboundRoutes.set(chatId, destinations);
+		this.outboundRoutes.set(sessionId, delivery);
 		return () => {
-			const currentDestinations = this.outboundRoutes.get(chatId);
-			if (!currentDestinations) {
-				return;
-			}
-			if (currentDestinations.get(outboundDestination) === delivery) {
-				currentDestinations.delete(outboundDestination);
-			}
-			if (currentDestinations.size === 0) {
-				this.outboundRoutes.delete(chatId);
+			if (this.outboundRoutes.get(sessionId) === delivery) {
+				this.outboundRoutes.delete(sessionId);
 			}
 		};
 	}
@@ -108,47 +104,50 @@ export class ServiceRoutes {
 	public async dispatchInteractive(
 		endpointId: string,
 		routeId: string,
-		input: ChatHandlerInteractiveInput
+		input: InteractiveInput
 	): Promise<void> {
-		const chatId = this.interactiveRoutes.get(
+		const sessionId = this.interactiveRoutes.get(
 			createInteractiveRouteKey(endpointId, routeId)
 		);
-		if (!chatId) {
+		if (!sessionId) {
 			throw new Error(
-				`No chat configured for route ${routeId} on endpoint ${endpointId}`
+				`No session configured for route ${routeId} on endpoint ${endpointId}`
 			);
 		}
-		await this.requireChatHandler(chatId).submitInteractive(input);
+		await this.requireSession(sessionId).submitInteractive(input);
 	}
 
 	public async dispatchCron(
 		chatId: string,
-		input: ChatHandlerCronInput
+		input: CronInput
 	): Promise<PhiMessage[]> {
-		return await this.requireChatHandler(chatId).submitCron(input);
+		const sessionId = this.cronRoutes.get(chatId);
+		if (!sessionId) {
+			throw new Error(`No cron session configured for chat ${chatId}`);
+		}
+		return await this.requireSession(sessionId).submitCron(input);
 	}
 
 	public async deliverOutbound(
-		chatId: string,
-		message: PhiMessage,
-		outboundDestination: string
+		sessionId: string,
+		message: PhiMessage
 	): Promise<void> {
-		const delivery = this.outboundRoutes
-			.get(chatId)
-			?.get(outboundDestination);
+		const delivery = this.outboundRoutes.get(sessionId);
 		if (!delivery) {
 			throw new Error(
-				`No outbound route configured for chat ${chatId} and destination ${outboundDestination}`
+				`No outbound route configured for session ${sessionId}`
 			);
 		}
 		await delivery.deliver(message);
 	}
 
-	private requireChatHandler(chatId: string): ChatHandler {
-		const handler = this.chatHandlers.get(chatId);
-		if (!handler) {
-			throw new Error(`No chat handler registered for chat ${chatId}`);
+	private requireSession(sessionId: string): Session {
+		const session = this.sessions.get(sessionId);
+		if (!session) {
+			throw new Error(
+				`No session runtime registered for session ${sessionId}`
+			);
 		}
-		return handler;
+		return session;
 	}
 }

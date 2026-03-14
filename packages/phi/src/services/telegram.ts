@@ -90,7 +90,9 @@ export async function startTelegramEndpoint(
 ): Promise<RunningTelegramEndpoint> {
 	log.info("telegram.bot.starting", {
 		routeCount: Object.keys(config.chatRoutes).length,
-		chatIds: Object.values(config.chatRoutes).map((t) => t.chatId),
+		sessionIds: Object.values(config.chatRoutes).map(
+			(target) => target.sessionId
+		),
 	});
 
 	for (const target of Object.values(config.chatRoutes)) {
@@ -140,6 +142,7 @@ export async function startTelegramEndpoint(
 			log.info("telegram.message.completed", {
 				routeId,
 				chatId: target.chatId,
+				sessionId: target.sessionId,
 				messageId,
 			});
 		},
@@ -157,6 +160,7 @@ export async function startTelegramEndpoint(
 			log.error("telegram.message.failed", {
 				routeId,
 				chatId: target.chatId,
+				sessionId: target.sessionId,
 				messageId,
 				err: normalizeUnknownError(error),
 			});
@@ -181,13 +185,12 @@ export async function startTelegramEndpoint(
 		const target = config.chatRoutes[ctx.routeId];
 		if (!target) {
 			throw new Error(
-				`No agent configured for telegram chat id: ${ctx.routeId}`
+				`No session configured for telegram chat id: ${ctx.routeId}`
 			);
 		}
 		await routes.dispatchInteractive(ctx.instanceId, ctx.routeId, {
 			text: ctx.text,
 			attachments: ctx.attachments,
-			outboundDestination: "telegram",
 			metadata: ctx.metadata,
 			sendTyping: ctx.sendTyping,
 		});
@@ -206,16 +209,17 @@ export async function startTelegramEndpoint(
 			routes.registerInteractiveRoute(
 				provider.instanceId,
 				routeId,
-				target.chatId
+				target.sessionId
 			)
 		);
 		unregisterRoutes.push(
-			routes.registerOutboundRoute(target.chatId, "telegram", {
+			routes.registerOutboundRoute(target.sessionId, {
 				deliver: async (message) => {
 					const idempotencyKey = createOutboundAuditKey(routeId);
 					const fields = {
 						routeId,
 						chatId: target.chatId,
+						sessionId: target.sessionId,
 						textLength: message.text?.length,
 						attachmentCount: message.attachments.length,
 					};
@@ -251,6 +255,17 @@ export async function startTelegramEndpoint(
 		);
 	}
 
+	let routesUnregistered = false;
+	function unregisterAllRoutes(): void {
+		if (routesUnregistered) {
+			return;
+		}
+		routesUnregistered = true;
+		for (const unregister of unregisterRoutes) {
+			unregister();
+		}
+	}
+
 	const runningDone = provider
 		.startWithFatalHandler()
 		.then(
@@ -260,26 +275,24 @@ export async function startTelegramEndpoint(
 				});
 			},
 			(error: unknown) => {
-				log.error("telegram.bot.start_failed", {
+				log.error("telegram.bot.stopped_with_error", {
 					err: normalizeUnknownError(error),
-					routeCount: Object.keys(config.chatRoutes).length,
 				});
 				throw error;
 			}
 		)
 		.finally(() => {
-			log.info("telegram.bot.stopped", {
-				routeCount: Object.keys(config.chatRoutes).length,
-			});
-			for (const unregister of unregisterRoutes) {
-				unregister();
-			}
+			unregisterAllRoutes();
 		});
 
 	return {
 		done: runningDone,
 		async stop(): Promise<void> {
+			unregisterAllRoutes();
 			await provider.stop();
+			log.info("telegram.bot.stopped", {
+				routeCount: Object.keys(config.chatRoutes).length,
+			});
 		},
 	};
 }

@@ -150,7 +150,7 @@ describe("buildPhiSystemPrompt", () => {
 			).toBe(true);
 			expect(
 				prompt.includes(
-					"When creating cron config, default `cron.destination` to the current interactive message source endpoint unless the user asks for a different destination."
+					"Cron jobs live in workspace config. The target session is configured in `~/.phi/phi.yaml`."
 				)
 			).toBe(true);
 			expect(

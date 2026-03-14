@@ -3,11 +3,12 @@
 # phi.yaml - operator-owned routing and agent config
 #
 # Core model:
-#   Endpoints <-> Routes <-> Chat handlers <-> Agent(pi)
+#   Endpoints <-> Routes <-> Session <-> Agent(pi)
 #
 # Supported today:
-# - agents: reusable agent runtime config
-# - chats: chat identities + endpoint routes
+# - agents: reusable execution config
+# - chats: workspace-scoped containers
+# - sessions: route-bound conversation state
 
 ---
 
@@ -26,10 +27,20 @@ chats:
   user-alice:
     # Workspace where .phi/ (sessions, memory, inbox, cron jobs) lives
     workspace: "~/phi/workspaces/alice"
-    # Bind this chat identity to one configured agent
+
+sessions:
+  alice-telegram:
+    # Bind this session to one chat workspace and one agent config
+    chat: user-alice
     agent: main
-    # Endpoint routes for this chat
+
+    # Endpoint routes for this session
     routes:
       telegram:
         id: <chat-id>
         token: <telegram-token>
+
+  alice-cron:
+    chat: user-alice
+    agent: main
+    cron: true

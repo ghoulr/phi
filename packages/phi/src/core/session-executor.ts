@@ -3,26 +3,26 @@ import {
 	type JobQueueProvider,
 } from "@phi/core/job-queue";
 
-export interface ChatExecutor {
+export interface SessionExecutor {
 	run<TResult>(
-		chatId: string,
+		sessionId: string,
 		handler: () => Promise<TResult>
 	): Promise<TResult>;
 }
 
-export class InMemoryChatExecutor implements ChatExecutor {
+export class InMemorySessionExecutor implements SessionExecutor {
 	private readonly queue;
 
 	public constructor(
 		queueProvider: JobQueueProvider = new InMemoryJobQueueProvider()
 	) {
-		this.queue = queueProvider.createQueue("chat-executor");
+		this.queue = queueProvider.createQueue("session-executor");
 	}
 
 	public async run<TResult>(
-		chatId: string,
+		sessionId: string,
 		handler: () => Promise<TResult>
 	): Promise<TResult> {
-		return await this.queue.enqueue(chatId, handler);
+		return await this.queue.enqueue(sessionId, handler);
 	}
 }

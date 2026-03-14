@@ -22,35 +22,43 @@ export interface PhiAgentConfig {
 	thinkingLevel?: PhiThinkingLevel;
 }
 
-export interface TelegramChatRouteConfig {
+export interface TelegramSessionRouteConfig {
 	enabled?: boolean;
 	id: number | string;
 	token: string;
 }
 
-export interface PhiChatRoutesConfig {
-	telegram?: TelegramChatRouteConfig;
+export interface PhiSessionRoutesConfig {
+	telegram?: TelegramSessionRouteConfig;
 }
 
 export interface PhiChatConfig {
 	workspace: string;
+}
+
+export interface PhiSessionConfig {
+	chat: string;
 	agent: string;
-	routes?: PhiChatRoutesConfig;
+	routes?: PhiSessionRoutesConfig;
+	cron?: boolean;
 }
 
 export interface PhiConfig {
 	agents?: Record<string, PhiAgentConfig>;
 	chats?: Record<string, PhiChatConfig>;
+	sessions?: Record<string, PhiSessionConfig>;
 }
 
-export interface ResolvedTelegramChatServiceConfig {
+export interface ResolvedTelegramSessionServiceConfig {
+	sessionId: string;
 	chatId: string;
 	workspace: string;
 	telegramChatId: string;
 	token: string;
 }
 
-export interface ResolvedCronChatServiceConfig {
+export interface ResolvedCronSessionServiceConfig {
+	sessionId: string;
 	chatId: string;
 	workspace: string;
 }
@@ -63,6 +71,12 @@ export interface ResolvedAgentRuntimeConfig {
 }
 
 export interface ResolvedChatRuntimeConfig {
+	chatId: string;
+	workspace: string;
+}
+
+export interface ResolvedSessionRuntimeConfig {
+	sessionId: string;
 	chatId: string;
 	workspace: string;
 	agentId: string;
@@ -104,9 +118,32 @@ function resolveChatRuntimeConfigFromEntry(
 			chatConfig.workspace,
 			`Invalid chat configuration for ${chatId}: missing workspace`
 		),
+	};
+}
+
+function resolveSessionRuntimeConfigFromEntry(params: {
+	phiConfig: PhiConfig;
+	sessionId: string;
+	sessionConfig: PhiSessionConfig;
+}): ResolvedSessionRuntimeConfig {
+	const chatId = toNonEmptyString(
+		params.sessionConfig.chat,
+		`Invalid session configuration for ${params.sessionId}: missing chat`
+	);
+	const chatConfig = params.phiConfig.chats?.[chatId];
+	if (!chatConfig) {
+		throw new Error(
+			`Missing chat configuration for session ${params.sessionId}: ${chatId}`
+		);
+	}
+	const resolvedChat = resolveChatRuntimeConfigFromEntry(chatId, chatConfig);
+	return {
+		sessionId: params.sessionId,
+		chatId,
+		workspace: resolvedChat.workspace,
 		agentId: toNonEmptyString(
-			chatConfig.agent,
-			`Invalid chat configuration for ${chatId}: missing agent`
+			params.sessionConfig.agent,
+			`Invalid session configuration for ${params.sessionId}: missing agent`
 		),
 	};
 }
@@ -165,37 +202,39 @@ export function assertUniqueChatWorkspaces(
 	}
 }
 
-export function collectTelegramChatServiceConfigs(
+export function collectTelegramSessionServiceConfigs(
 	phiConfig: PhiConfig
-): ResolvedTelegramChatServiceConfig[] {
+): ResolvedTelegramSessionServiceConfig[] {
 	assertUniqueChatWorkspaces(phiConfig);
 
-	const chats = phiConfig.chats;
-	if (!chats) {
-		throw new Error("Missing chats configuration in phi config.");
+	const sessions = phiConfig.sessions;
+	if (!sessions) {
+		throw new Error("Missing sessions configuration in phi config.");
 	}
 
-	const entries: ResolvedTelegramChatServiceConfig[] = [];
-	for (const [chatId, chatConfig] of Object.entries(chats)) {
-		const telegramRoute = chatConfig.routes?.telegram;
+	const entries: ResolvedTelegramSessionServiceConfig[] = [];
+	for (const [sessionId, sessionConfig] of Object.entries(sessions)) {
+		const telegramRoute = sessionConfig.routes?.telegram;
 		if (!telegramRoute || telegramRoute.enabled === false) {
 			continue;
 		}
 
-		const resolvedChat = resolveChatRuntimeConfigFromEntry(
-			chatId,
-			chatConfig
-		);
+		const resolvedSession = resolveSessionRuntimeConfigFromEntry({
+			phiConfig,
+			sessionId,
+			sessionConfig,
+		});
 		entries.push({
-			chatId,
-			workspace: resolvedChat.workspace,
+			sessionId,
+			chatId: resolvedSession.chatId,
+			workspace: resolvedSession.workspace,
 			telegramChatId: toTelegramChatId(
 				telegramRoute.id,
-				`Invalid telegram route for chat ${chatId}: missing id`
+				`Invalid telegram route for session ${sessionId}: missing id`
 			),
 			token: toNonEmptyString(
 				telegramRoute.token,
-				`Invalid telegram route for chat ${chatId}: missing token`
+				`Invalid telegram route for session ${sessionId}: missing token`
 			),
 		});
 	}
@@ -203,37 +242,54 @@ export function collectTelegramChatServiceConfigs(
 	return entries;
 }
 
-export function resolveCronChatServiceConfigs(
+export function resolveCronSessionServiceConfigs(
 	phiConfig: PhiConfig
-): ResolvedCronChatServiceConfig[] {
+): ResolvedCronSessionServiceConfig[] {
 	assertUniqueChatWorkspaces(phiConfig);
 
-	const chats = phiConfig.chats;
-	if (!chats) {
-		throw new Error("Missing chats configuration in phi config.");
+	const sessions = phiConfig.sessions;
+	if (!sessions) {
+		throw new Error("Missing sessions configuration in phi config.");
 	}
 
-	return Object.entries(chats).map(([chatId, chatConfig]) => {
-		const resolvedChat = resolveChatRuntimeConfigFromEntry(
-			chatId,
-			chatConfig
-		);
-		return {
-			chatId: resolvedChat.chatId,
-			workspace: resolvedChat.workspace,
-		};
-	});
+	const entries: ResolvedCronSessionServiceConfig[] = [];
+	const chatOwners = new Map<string, string>();
+	for (const [sessionId, sessionConfig] of Object.entries(sessions)) {
+		if (sessionConfig.cron !== true) {
+			continue;
+		}
+		const resolvedSession = resolveSessionRuntimeConfigFromEntry({
+			phiConfig,
+			sessionId,
+			sessionConfig,
+		});
+		const existingSessionId = chatOwners.get(resolvedSession.chatId);
+		if (existingSessionId) {
+			throw new Error(
+				`Duplicate cron session for chat ${resolvedSession.chatId}: ${existingSessionId} and ${sessionId}`
+			);
+		}
+		chatOwners.set(resolvedSession.chatId, sessionId);
+		entries.push({
+			sessionId,
+			chatId: resolvedSession.chatId,
+			workspace: resolvedSession.workspace,
+		});
+	}
+	return entries;
 }
 
-export function resolveEnabledChatRouteKeys(
+export function resolveEnabledSessionRouteKeys(
 	phiConfig: PhiConfig,
-	chatId: string
+	sessionId: string
 ): string[] {
-	const chatConfig = phiConfig.chats?.[chatId];
-	if (!chatConfig) {
-		throw new Error(`Missing chat configuration for chat id: ${chatId}`);
+	const sessionConfig = phiConfig.sessions?.[sessionId];
+	if (!sessionConfig) {
+		throw new Error(
+			`Missing session configuration for session id: ${sessionId}`
+		);
 	}
-	const routes = chatConfig.routes;
+	const routes = sessionConfig.routes;
 	if (!routes || !isRecord(routes)) {
 		return [];
 	}
@@ -264,6 +320,31 @@ export function resolveChatRuntimeConfig(
 	}
 
 	return resolveChatRuntimeConfigFromEntry(chatId, chatConfig);
+}
+
+export function resolveSessionRuntimeConfig(
+	phiConfig: PhiConfig,
+	sessionId: string
+): ResolvedSessionRuntimeConfig {
+	assertUniqueChatWorkspaces(phiConfig);
+
+	const sessions = phiConfig.sessions;
+	if (!sessions) {
+		throw new Error("Missing sessions configuration in phi config.");
+	}
+
+	const sessionConfig = sessions[sessionId];
+	if (!sessionConfig) {
+		throw new Error(
+			`Missing session configuration for session id: ${sessionId}`
+		);
+	}
+
+	return resolveSessionRuntimeConfigFromEntry({
+		phiConfig,
+		sessionId,
+		sessionConfig,
+	});
 }
 
 export function resolveAgentRuntimeConfig(

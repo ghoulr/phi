@@ -11,7 +11,7 @@ See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 ## Concepts
 
 - [Chat](./docs/concepts/chat.md)
-- [Chat Handler](./docs/concepts/chat-handler.md)
+- [Session](./docs/concepts/session.md)
 - [Workspace Config](./docs/concepts/workspace-config.md)
 - [System Prompt](./docs/concepts/system-prompt.md)
 - [Skills](./docs/concepts/skills.md)
@@ -22,7 +22,7 @@ See [ARCHITECT.md](./ARCHITECT.md) for the full design.
 - [Log](./docs/concepts/log.md)
 
 ```text
-Endpoints  ◄────►  Routes  ◄────►  Chat handlers  ◄────►  Agent(pi)
+Endpoints  ◄────►  Routes  ◄────►  Session  ◄────►  Agent(pi)
                      config-driven wiring
 ```
 

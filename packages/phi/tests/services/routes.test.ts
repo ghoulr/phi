@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
 
 import type { PhiMessage } from "@phi/messaging/types";
-import type { ChatHandler } from "@phi/services/chat-handler";
+import type { Session } from "@phi/services/session";
 import { ServiceRoutes } from "@phi/services/routes";
 
-function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
+function createSession(overrides: Partial<Session> = {}): Session {
 	return {
 		async submitInteractive(): Promise<void> {},
 		async submitCron(): Promise<PhiMessage[]> {
@@ -20,23 +20,26 @@ function createChatHandler(overrides: Partial<ChatHandler> = {}): ChatHandler {
 }
 
 describe("service routes", () => {
-	it("dispatches interactive messages to the configured chat handler", async () => {
+	it("dispatches interactive messages to the configured session", async () => {
 		const routes = new ServiceRoutes();
 		const submissions: unknown[] = [];
-		routes.registerChatHandler(
-			"alice",
-			createChatHandler({
+		routes.registerSession(
+			"alice-telegram",
+			createSession({
 				async submitInteractive(params): Promise<void> {
 					submissions.push(params);
 				},
 			})
 		);
-		routes.registerInteractiveRoute("telegram:bot-1", "42", "alice");
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"42",
+			"alice-telegram"
+		);
 
 		await routes.dispatchInteractive("telegram:bot-1", "42", {
 			text: "hello",
 			attachments: [],
-			outboundDestination: "telegram",
 			sendTyping: async () => ({ ok: true }),
 		});
 
@@ -44,100 +47,70 @@ describe("service routes", () => {
 			{
 				text: "hello",
 				attachments: [],
-				outboundDestination: "telegram",
 				sendTyping: expect.any(Function),
 			},
 		]);
 	});
 
-	it("dispatches cron triggers to the registered chat handler", async () => {
+	it("dispatches cron triggers to the configured session", async () => {
 		const routes = new ServiceRoutes();
-		routes.registerChatHandler(
-			"alice",
-			createChatHandler({
+		routes.registerSession(
+			"alice-cron",
+			createSession({
 				async submitCron(input): Promise<PhiMessage[]> {
 					return [{ text: input.text, attachments: [] }];
 				},
 			})
 		);
+		routes.registerCronRoute("alice", "alice-cron");
 
 		expect(
 			await routes.dispatchCron("alice", {
 				text: "cron prompt",
-				outboundDestination: "telegram",
 			})
 		).toEqual([{ text: "cron prompt", attachments: [] }]);
 	});
 
-	it("delivers outbound messages to the requested destination", async () => {
+	it("delivers outbound messages to the configured session route", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice", "telegram", {
+		routes.registerOutboundRoute("alice-telegram", {
 			async deliver(message): Promise<void> {
 				delivered.push(`telegram:${message.text}`);
 			},
 		});
-		routes.registerOutboundRoute("alice", "feishu", {
-			async deliver(message): Promise<void> {
-				delivered.push(`feishu:${message.text}`);
-			},
-		});
 
-		await routes.deliverOutbound(
-			"alice",
-			{
-				text: "done",
-				attachments: [],
-			},
-			"telegram"
-		);
+		await routes.deliverOutbound("alice-telegram", {
+			text: "done",
+			attachments: [],
+		});
 
 		expect(delivered).toEqual(["telegram:done"]);
 	});
 
-	it("fails when the requested destination does not exist", async () => {
+	it("fails when the outbound route does not exist", async () => {
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("alice", "telegram", {
-			async deliver(): Promise<void> {},
-		});
 
 		await expect(
-			routes.deliverOutbound(
-				"alice",
-				{ text: "done", attachments: [] },
-				"feishu"
-			)
+			routes.deliverOutbound("alice-missing", {
+				text: "done",
+				attachments: [],
+			})
 		).rejects.toThrow(
-			"No outbound route configured for chat alice and destination feishu"
+			"No outbound route configured for session alice-missing"
 		);
 	});
 
-	it("fails fast when duplicate outbound destination is registered", () => {
+	it("fails fast when duplicate outbound route is registered", () => {
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("alice", "telegram", {
+		routes.registerOutboundRoute("alice-telegram", {
 			async deliver(): Promise<void> {},
 		});
 
 		expect(() =>
-			routes.registerOutboundRoute("alice", "telegram", {
+			routes.registerOutboundRoute("alice-telegram", {
 				async deliver(): Promise<void> {},
 			})
-		).toThrow(
-			"Duplicate outbound route for chat alice and destination telegram"
-		);
-	});
-
-	it("fails fast when the same outbound delivery is registered twice", () => {
-		const routes = new ServiceRoutes();
-		const delivery = {
-			async deliver(): Promise<void> {},
-		};
-		routes.registerOutboundRoute("alice", "telegram", delivery);
-
-		expect(() =>
-			routes.registerOutboundRoute("alice", "telegram", delivery)
-		).toThrow(
-			"Duplicate outbound route for chat alice and destination telegram"
-		);
+		).toThrow("Duplicate outbound route for session alice-telegram");
 	});
 });

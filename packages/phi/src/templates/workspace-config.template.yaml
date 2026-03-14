@@ -14,12 +14,6 @@ cron:
   # Turn cron on or off for this workspace.
   enabled: true
 
-  # Outbound message destination for cron runs.
-  # Must match a message route key configured for this chat in ~/.phi/phi.yaml.
-  # Examples: `telegram`, `feishu`.
-  # Agents should default this to the current interactive message source endpoint.
-  destination: telegram
-
   # Cron job metadata lives here.
   # Prompt files live under <workspace>/.phi/cron/jobs/.
   # Each prompt file should describe what to do when the job fires, NOT what user asks.

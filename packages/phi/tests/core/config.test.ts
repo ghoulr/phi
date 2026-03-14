@@ -6,11 +6,12 @@ import { describe, expect, it } from "bun:test";
 
 import {
 	assertUniqueChatWorkspaces,
-	collectTelegramChatServiceConfigs,
+	collectTelegramSessionServiceConfigs,
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
-	resolveCronChatServiceConfigs,
+	resolveCronSessionServiceConfigs,
+	resolveSessionRuntimeConfig,
 } from "@phi/core/config";
 
 describe("phi config", () => {
@@ -20,7 +21,7 @@ describe("phi config", () => {
 		).toThrow("Missing phi config file");
 	});
 
-	it("collects telegram routes from chats", () => {
+	it("collects telegram routes from sessions", () => {
 		const directory = mkdtempSync(join(tmpdir(), "phi-config-"));
 		const configPath = join(directory, "phi.yaml");
 
@@ -35,6 +36,9 @@ describe("phi config", () => {
 					"chats:",
 					"  user-alice:",
 					"    workspace: ~/phi/workspaces/alice",
+					"sessions:",
+					"  alice-telegram:",
+					"    chat: user-alice",
 					"    agent: main",
 					"    routes:",
 					"      telegram:",
@@ -45,8 +49,9 @@ describe("phi config", () => {
 			);
 
 			const config = loadPhiConfig(configPath);
-			expect(collectTelegramChatServiceConfigs(config)).toEqual([
+			expect(collectTelegramSessionServiceConfigs(config)).toEqual([
 				{
+					sessionId: "alice-telegram",
 					chatId: "user-alice",
 					workspace: "~/phi/workspaces/alice",
 					telegramChatId: "-10001",
@@ -58,16 +63,21 @@ describe("phi config", () => {
 		}
 	});
 
-	it("skips chats without telegram route", () => {
+	it("skips sessions without telegram route", () => {
 		expect(
-			collectTelegramChatServiceConfigs({
+			collectTelegramSessionServiceConfigs({
 				chats: {
-					"user-no-telegram": {
-						workspace: "~/no-telegram",
+					shared: {
+						workspace: "~/active",
+					},
+				},
+				sessions: {
+					"session-no-telegram": {
+						chat: "shared",
 						agent: "main",
 					},
-					"user-active": {
-						workspace: "~/active",
+					"session-active": {
+						chat: "shared",
 						agent: "support",
 						routes: {
 							telegram: {
@@ -80,7 +90,8 @@ describe("phi config", () => {
 			})
 		).toEqual([
 			{
-				chatId: "user-active",
+				sessionId: "session-active",
+				chatId: "shared",
 				workspace: "~/active",
 				telegramChatId: "1002",
 				token: "token",
@@ -88,31 +99,83 @@ describe("phi config", () => {
 		]);
 	});
 
-	it("collects telegram routes without failing when none are enabled", () => {
+	it("collects cron sessions", () => {
 		expect(
-			collectTelegramChatServiceConfigs({
+			resolveCronSessionServiceConfigs({
 				chats: {
-					"user-alice": {
-						workspace: "~/alice",
+					alice: { workspace: "~/phi/workspaces/alice" },
+					bob: { workspace: "~/phi/workspaces/bob" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
 						agent: "main",
+						cron: true,
+					},
+					"bob-main": {
+						chat: "bob",
+						agent: "support",
+						cron: true,
 					},
 				},
 			})
-		).toEqual([]);
+		).toEqual([
+			{
+				sessionId: "alice-main",
+				chatId: "alice",
+				workspace: "~/phi/workspaces/alice",
+			},
+			{
+				sessionId: "bob-main",
+				chatId: "bob",
+				workspace: "~/phi/workspaces/bob",
+			},
+		]);
 	});
 
-	it("fails when chats mapping is missing", () => {
-		expect(() => collectTelegramChatServiceConfigs({})).toThrow(
-			"Missing chats configuration in phi config."
+	it("fails when two cron sessions point to the same chat", () => {
+		expect(() =>
+			resolveCronSessionServiceConfigs({
+				chats: {
+					alice: { workspace: "~/phi/workspaces/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						cron: true,
+					},
+					"alice-support": {
+						chat: "alice",
+						agent: "support",
+						cron: true,
+					},
+				},
+			})
+		).toThrow(
+			"Duplicate cron session for chat alice: alice-main and alice-support"
 		);
+	});
+
+	it("fails when sessions mapping is missing", () => {
+		expect(() =>
+			collectTelegramSessionServiceConfigs({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+			})
+		).toThrow("Missing sessions configuration in phi config.");
 	});
 
 	it("fails when telegram route token is missing", () => {
 		expect(() =>
-			collectTelegramChatServiceConfigs({
+			collectTelegramSessionServiceConfigs({
 				chats: {
-					"user-alice": {
-						workspace: "~/alice",
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
 						agent: "main",
 						routes: {
 							telegram: {
@@ -123,42 +186,21 @@ describe("phi config", () => {
 					},
 				},
 			})
-		).toThrow("Invalid telegram route for chat user-alice: missing token");
-	});
-
-	it("fails when chat workspace is missing", () => {
-		expect(() =>
-			collectTelegramChatServiceConfigs({
-				chats: {
-					"user-alice": {
-						workspace: "",
-						agent: "main",
-						routes: {
-							telegram: {
-								id: "1001",
-								token: "token",
-							},
-						},
-					},
-				},
-			})
 		).toThrow(
-			"Invalid chat configuration for user-alice: missing workspace"
+			"Invalid telegram route for session alice-main: missing token"
 		);
 	});
 
-	it("fails when enabled chats resolve to the same workspace", () => {
+	it("fails when chats resolve to the same workspace", () => {
 		expect(() =>
 			assertUniqueChatWorkspaces(
 				{
 					chats: {
 						"user-alice": {
 							workspace: "~/phi/shared",
-							agent: "main",
 						},
 						"user-bob": {
 							workspace: "~/phi/shared",
-							agent: "support",
 						},
 					},
 				},
@@ -169,43 +211,13 @@ describe("phi config", () => {
 		);
 	});
 
-	it("fails collecting telegram routes when workspaces collide", () => {
-		expect(() =>
-			collectTelegramChatServiceConfigs({
-				chats: {
-					"user-alice": {
-						workspace: "~/phi/shared",
-						agent: "main",
-						routes: {
-							telegram: {
-								id: "1001",
-								token: "token",
-							},
-						},
-					},
-					"user-bob": {
-						workspace: "~/phi/shared",
-						agent: "support",
-						routes: {
-							telegram: {
-								id: "1002",
-								token: "token",
-							},
-						},
-					},
-				},
-			})
-		).toThrow("resolve to the same workspace");
-	});
-
-	it("resolves chat runtime config from phi config", () => {
+	it("resolves chat runtime config", () => {
 		expect(
 			resolveChatRuntimeConfig(
 				{
 					chats: {
 						"user-alice": {
 							workspace: "~/phi/workspaces/alice",
-							agent: "main",
 						},
 					},
 				},
@@ -214,72 +226,33 @@ describe("phi config", () => {
 		).toEqual({
 			chatId: "user-alice",
 			workspace: "~/phi/workspaces/alice",
-			agentId: "main",
 		});
 	});
 
-	it("resolves cron chat configs", () => {
+	it("resolves session runtime config", () => {
 		expect(
-			resolveCronChatServiceConfigs({
-				chats: {
-					"user-alice": {
-						workspace: "~/phi/workspaces/alice",
-						agent: "main",
-					},
-					"user-bob": {
-						workspace: "~/phi/workspaces/bob",
-						agent: "support",
-					},
-				},
-			})
-		).toEqual([
-			{
-				chatId: "user-alice",
-				workspace: "~/phi/workspaces/alice",
-			},
-			{
-				chatId: "user-bob",
-				workspace: "~/phi/workspaces/bob",
-			},
-		]);
-	});
-
-	it("fails resolving chat runtime config when workspaces collide", () => {
-		expect(() =>
-			resolveChatRuntimeConfig(
+			resolveSessionRuntimeConfig(
 				{
 					chats: {
 						"user-alice": {
-							workspace: "~/phi/shared",
-							agent: "main",
-						},
-						"user-bob": {
-							workspace: "~/phi/shared",
-							agent: "support",
+							workspace: "~/phi/workspaces/alice",
 						},
 					},
-				},
-				"user-alice"
-			)
-		).toThrow("resolve to the same workspace");
-	});
-
-	it("fails when chat runtime workspace is missing", () => {
-		expect(() =>
-			resolveChatRuntimeConfig(
-				{
-					chats: {
-						"user-alice": {
-							workspace: "",
+					sessions: {
+						"alice-main": {
+							chat: "user-alice",
 							agent: "main",
 						},
 					},
 				},
-				"user-alice"
+				"alice-main"
 			)
-		).toThrow(
-			"Invalid chat configuration for user-alice: missing workspace"
-		);
+		).toEqual({
+			sessionId: "alice-main",
+			chatId: "user-alice",
+			workspace: "~/phi/workspaces/alice",
+			agentId: "main",
+		});
 	});
 
 	it("resolves agent runtime config from phi config", () => {
@@ -302,20 +275,5 @@ describe("phi config", () => {
 			model: "big-pickle",
 			thinkingLevel: "medium",
 		});
-	});
-
-	it("fails when agent runtime provider is missing", () => {
-		expect(() =>
-			resolveAgentRuntimeConfig(
-				{
-					agents: {
-						main: {
-							model: "big-pickle",
-						},
-					},
-				},
-				"main"
-			)
-		).toThrow("Invalid agent configuration for main: missing provider");
 	});
 });

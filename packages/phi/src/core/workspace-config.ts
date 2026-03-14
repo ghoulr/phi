@@ -14,7 +14,6 @@ export interface PhiWorkspaceChatConfig {
 
 export interface PhiWorkspaceCronConfig {
 	enabled?: boolean;
-	destination?: string;
 	jobs?: CronJobDefinition[];
 }
 
@@ -111,21 +110,6 @@ export function resolveWorkspaceTimezone(
 	return resolveOptionalNonEmptyString(
 		workspaceConfig.chat?.timezone,
 		"chat.timezone",
-		configFilePath
-	);
-}
-
-export function resolveWorkspaceCronDestination(
-	workspaceConfig: PhiWorkspaceConfig,
-	configFilePath: string
-): string | undefined {
-	const cronConfig = workspaceConfig.cron;
-	if (!cronConfig || cronConfig.enabled === false) {
-		return undefined;
-	}
-	return resolveOptionalNonEmptyString(
-		cronConfig.destination,
-		"cron.destination",
 		configFilePath
 	);
 }
