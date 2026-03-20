@@ -1,5 +1,3 @@
-import { Cron } from "croner";
-
 import type { LoadedCronJob } from "@phi/cron/types";
 
 interface LocalDateTimeParts {
@@ -10,6 +8,8 @@ interface LocalDateTimeParts {
 	minute: number;
 	second: number;
 }
+
+const MAX_CRON_PARSE_ATTEMPTS = 24 * 60;
 
 function getZonedDateTimeParts(
 	timestampMs: number,
@@ -39,6 +39,18 @@ function getZonedDateTimeParts(
 		hour: Number(values.hour),
 		minute: Number(values.minute),
 		second: Number(values.second),
+	};
+}
+
+function getUtcDateTimeParts(timestampMs: number): LocalDateTimeParts {
+	const date = new Date(timestampMs);
+	return {
+		year: date.getUTCFullYear(),
+		month: date.getUTCMonth() + 1,
+		day: date.getUTCDate(),
+		hour: date.getUTCHours(),
+		minute: date.getUTCMinutes(),
+		second: date.getUTCSeconds(),
 	};
 }
 
@@ -84,6 +96,29 @@ function partsToComparableValue(parts: LocalDateTimeParts): number {
 		parts.minute,
 		parts.second
 	);
+}
+
+function formatLocalDateTime(parts: LocalDateTimeParts): string {
+	return `${String(parts.year).padStart(4, "0")}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")} ${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}:${String(parts.second).padStart(2, "0")}`;
+}
+
+function isInvalidLocalDateTimeForTimezoneError(
+	error: unknown,
+	timezone: string
+): boolean {
+	return (
+		error instanceof Error &&
+		error.message.startsWith(
+			`Invalid local datetime for timezone ${timezone}:`
+		)
+	);
+}
+
+function toComparableLocalTimestampMs(
+	timestampMs: number,
+	timezone: string
+): number {
+	return partsToComparableValue(getZonedDateTimeParts(timestampMs, timezone));
 }
 
 export function parseAtDateTimeToMs(at: string, timezone: string): number {
@@ -135,28 +170,31 @@ export function computeCronJobNextRunAtMs(
 		throw new Error(`Cron job ${job.id} is missing cron expression`);
 	}
 
-	const cron = new Cron(job.cron, {
-		timezone,
-		catch: false,
-	});
-	const next = cron.nextRun(new Date(nowMs));
-	if (!next) {
-		return undefined;
+	let relativeMs = toComparableLocalTimestampMs(nowMs, timezone);
+	for (let attempt = 0; attempt < MAX_CRON_PARSE_ATTEMPTS; attempt += 1) {
+		const next = Bun.cron.parse(job.cron, relativeMs);
+		if (!next) {
+			return undefined;
+		}
+
+		const candidateAt = formatLocalDateTime(
+			getUtcDateTimeParts(next.getTime())
+		);
+		try {
+			const candidateMs = parseAtDateTimeToMs(candidateAt, timezone);
+			if (candidateMs > nowMs) {
+				return candidateMs;
+			}
+		} catch (error: unknown) {
+			if (!isInvalidLocalDateTimeForTimezoneError(error, timezone)) {
+				throw error;
+			}
+		}
+
+		relativeMs = next.getTime() + 1000;
 	}
 
-	const nextMs = next.getTime();
-	if (!Number.isFinite(nextMs)) {
-		return undefined;
-	}
-	if (nextMs > nowMs) {
-		return nextMs;
-	}
-
-	const retry = cron.nextRun(
-		new Date(Math.floor(nowMs / 1000) * 1000 + 1000)
+	throw new Error(
+		`Unable to resolve cron expression for job ${job.id} in timezone ${timezone}`
 	);
-	if (!retry) {
-		return undefined;
-	}
-	return retry.getTime();
 }

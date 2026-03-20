@@ -4,62 +4,67 @@ import {
 	computeCronJobNextRunAtMs,
 	parseAtDateTimeToMs,
 } from "@phi/cron/schedule";
+import type { LoadedCronJob } from "@phi/cron/types";
 
 const TIMEZONE = "Asia/Shanghai";
 
+function createCronJob(overrides: Partial<LoadedCronJob> = {}): LoadedCronJob {
+	return {
+		id: "daily",
+		enabled: true,
+		prompt: "jobs/daily.md",
+		promptFilePath: "/tmp/daily.md",
+		promptText: "Do work",
+		cron: "0 9 * * *",
+		...overrides,
+	};
+}
+
 describe("cron schedule", () => {
-	it("parses chat-local at time into a future timestamp", () => {
-		const atMs = parseAtDateTimeToMs("2026-03-08 09:00", TIMEZONE);
-		expect(Number.isFinite(atMs)).toBe(true);
-		expect(atMs).toBeGreaterThan(Date.UTC(2026, 2, 8, 0, 0, 0));
+	it("parses chat-local at time into the exact UTC timestamp", () => {
+		expect(parseAtDateTimeToMs("2026-03-08 09:00", TIMEZONE)).toBe(
+			Date.UTC(2026, 2, 8, 1, 0, 0)
+		);
 	});
 
-	it("computes next run for one-shot jobs", () => {
-		const nextRunAtMs = computeCronJobNextRunAtMs(
-			{
-				id: "once",
-				enabled: true,
-				prompt: "jobs/once.md",
-				promptFilePath: "/tmp/once.md",
-				promptText: "Do work",
-				at: "2026-03-08 09:00",
-			},
-			TIMEZONE,
-			Date.UTC(2026, 2, 7, 0, 0, 0)
-		);
-
-		expect(nextRunAtMs).toBeDefined();
+	it("computes the exact next recurring run in the chat timezone", () => {
+		expect(
+			computeCronJobNextRunAtMs(
+				createCronJob(),
+				TIMEZONE,
+				Date.UTC(2026, 2, 7, 0, 0, 0)
+			)
+		).toBe(Date.UTC(2026, 2, 7, 1, 0, 0));
 	});
 
-	it("computes future run for recurring cron jobs", () => {
-		const nextRunAtMs = computeCronJobNextRunAtMs(
-			{
-				id: "daily",
-				enabled: true,
-				prompt: "jobs/daily.md",
-				promptFilePath: "/tmp/daily.md",
-				promptText: "Do work",
-				cron: "0 9 * * *",
-			},
-			TIMEZONE,
-			Date.UTC(2026, 2, 7, 0, 0, 0)
-		);
+	it("moves to the next recurrence when now is already on the scheduled boundary", () => {
+		expect(
+			computeCronJobNextRunAtMs(
+				createCronJob(),
+				TIMEZONE,
+				Date.UTC(2026, 2, 7, 1, 0, 0)
+			)
+		).toBe(Date.UTC(2026, 2, 8, 1, 0, 0));
+	});
 
-		expect(nextRunAtMs).toBeDefined();
-		expect(nextRunAtMs).toBeGreaterThan(Date.UTC(2026, 2, 7, 0, 0, 0));
+	it("skips nonexistent DST local times instead of throwing", () => {
+		expect(
+			computeCronJobNextRunAtMs(
+				createCronJob({ cron: "30 2 * * *" }),
+				"America/New_York",
+				Date.UTC(2026, 2, 8, 6, 0, 0)
+			)
+		).toBe(Date.UTC(2026, 2, 9, 6, 30, 0));
 	});
 
 	it("returns undefined for past one-shot jobs", () => {
 		expect(
 			computeCronJobNextRunAtMs(
-				{
+				createCronJob({
 					id: "once",
-					enabled: true,
-					prompt: "jobs/once.md",
-					promptFilePath: "/tmp/once.md",
-					promptText: "Do work",
+					cron: undefined,
 					at: "2026-03-08 09:00",
-				},
+				}),
 				TIMEZONE,
 				Date.UTC(2026, 2, 9, 0, 0, 0)
 			)

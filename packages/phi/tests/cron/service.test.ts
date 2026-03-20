@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, jest } from "bun:test";
 
 import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
 import {
@@ -11,11 +11,12 @@ import {
 	setPhiLoggerSettingsForTest,
 } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
-import type { Session } from "@phi/services/session";
-import { ServiceRoutes } from "@phi/services/routes";
 import { startCronService } from "@phi/cron/service";
 import type { PhiMessage } from "@phi/messaging/types";
+import { ServiceRoutes } from "@phi/services/routes";
+import type { Session } from "@phi/services/session";
 
+const TEST_NOW_MS = Date.UTC(2026, 2, 7, 0, 0, 0);
 const createdRoots: string[] = [];
 let logOutput = "";
 let logCaptureConfigured = false;
@@ -84,7 +85,23 @@ function createSession(overrides: Partial<Session> = {}): Session {
 	};
 }
 
+function useFakeClock(): void {
+	jest.useFakeTimers({ now: TEST_NOW_MS });
+}
+
+async function flushMicrotasks(): Promise<void> {
+	for (let index = 0; index < 3; index += 1) {
+		await new Promise<void>((resolve) => queueMicrotask(resolve));
+	}
+}
+
+async function advanceClockAndFlush(milliseconds: number): Promise<void> {
+	jest.advanceTimersByTime(milliseconds);
+	await flushMicrotasks();
+}
+
 afterEach(() => {
+	jest.useRealTimers();
 	resetPhiLoggerForTest();
 	logOutput = "";
 	logCaptureConfigured = false;
@@ -96,6 +113,7 @@ afterEach(() => {
 
 describe("startCronService", () => {
 	it("runs one-shot jobs through routes and writes run logs", async () => {
+		useFakeClock();
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		const workspace = createWorkspace();
 		const layout = ensureChatWorkspaceLayout(workspace);
@@ -155,7 +173,7 @@ describe("startCronService", () => {
 			routes,
 		});
 
-		await Bun.sleep(2600);
+		await advanceClockAndFlush(2600);
 		await service.stop();
 
 		expect(prompts).toEqual(["Summarize status."]);
@@ -164,6 +182,7 @@ describe("startCronService", () => {
 	});
 
 	it("keeps the previous valid schedule when reload fails", async () => {
+		useFakeClock();
 		const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 		const workspace = createWorkspace();
 		const layout = ensureChatWorkspaceLayout(workspace);
@@ -243,7 +262,7 @@ describe("startCronService", () => {
 		await expect(reloadRegistry.validate("alice")).rejects.toThrow(
 			"Missing prompt file for cron job broken"
 		);
-		await Bun.sleep(2600);
+		await advanceClockAndFlush(2600);
 		await service.stop();
 
 		expect(runCalls).toBe(1);
