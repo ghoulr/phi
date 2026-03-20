@@ -30,6 +30,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # IntelliJ based IDEs
 .idea
 
+# antigravity and claude code shit
+CLAUDE.md
+GEMINI.md
+
 # Finder (MacOS) folder config
 .DS_Store
 
