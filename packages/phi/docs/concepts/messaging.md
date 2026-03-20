@@ -5,7 +5,8 @@ pi owns agent execution and tool orchestration.
 
 Per-turn runtime context is defined in [system-reminder.md](/home/zhourui/workspace/phi/docs/concepts/system-reminder.md).
 
-Messaging is a self-contained phi extension, loaded through the standard pi extension entrypoint.
+Messaging is implemented as a built-in phi extension.
+It owns delivery semantics for one agent run.
 
 ## Message Kinds
 
@@ -33,6 +34,7 @@ Rules:
 - exact `NO_REPLY` is invalid input for `send`
 - `instant: true` delivers immediately
 - `instant: false` stages one deferred message for the active agent run
+- only one deferred message is allowed per run
 - `mentionSender` resolves from the current turn's `system-reminder`
 - invalid input is an error
 
@@ -42,4 +44,5 @@ Rules:
 It suppresses the final assistant text for the active messaging run.
 It is only valid as the exact final assistant reply, not as `send.text`.
 
-Messaging semantics (`NO_REPLY`, deferred drafts, sender mentions) live exclusively inside the extension.
+Messaging semantics such as `NO_REPLY`, deferred drafts, and sender mentions live inside the extension.
+Actual transport delivery still goes through phi routes and endpoints.

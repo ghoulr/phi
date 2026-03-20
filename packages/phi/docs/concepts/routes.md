@@ -16,9 +16,6 @@ Routes map:
 - session to outbound delivery
 - session to endpoint chat binding
 
-Routes do not own session history.
-Routes do not interpret message meaning.
-
 ## Config
 
 Static routing intent lives in `~/.phi/phi.yaml`.

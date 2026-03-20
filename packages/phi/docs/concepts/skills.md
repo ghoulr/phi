@@ -14,13 +14,12 @@ TUI chat loads global skills from `~/.phi/pi/skills`.
 ## Loader
 
 Service chat builds a pi `DefaultResourceLoader` with `noSkills: true` and explicit `additionalSkillPaths`.
-Phi does not implement a separate skill runtime.
 
 ## Prompt and commands
 
 - Loaded skills are exposed via pi `formatSkillsForPrompt(...)`.
 - `disable-model-invocation: true` hides the skill from the system prompt but keeps `/skill:name` available.
-- Skills are not hot-reloaded within a session. New sessions discover the updated skill set.
+- Skill changes take effect in new sessions.
 
 ## Skill env
 

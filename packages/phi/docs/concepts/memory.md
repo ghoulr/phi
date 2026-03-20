@@ -63,14 +63,14 @@ Examples:
 Rules:
 
 - append-oriented
-- not auto-injected
+- loaded on demand
 - may be messy
 - later distill useful content into `MEMORY.md`
 
 ## Runtime Rules
 
 1. Inject `MEMORY.md` into the system prompt.
-2. Do not inject `YYYY-MM-DD.md` automatically.
+2. Load `YYYY-MM-DD.md` on demand.
 3. Write short durable facts to `MEMORY.md`.
 4. Keep `MEMORY.md` small and concise; rewrite it when needed.
 5. Write raw notes to the current dated daily note file such as `2026-03-06.md`.

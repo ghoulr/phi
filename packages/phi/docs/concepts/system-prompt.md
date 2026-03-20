@@ -22,10 +22,11 @@ Describes the system prompt used by phi chat sessions.
 | `memoryFilePath` | `<workspace>/.phi/memory/MEMORY.md` | `~/.phi/pi/memory/MEMORY.md` |
 | `tools` | active built-in file tools plus active runtime tools when available | active built-in file tools |
 
-Service chat skills come from pi `DefaultResourceLoader` with phi-managed skill roots.
-TUI chat uses pi skill loading from the global phi state.
-Custom and SDK tools contribute prompt text through pi tool metadata (`promptSnippet`, `promptGuidelines`).
-Built-in tools still use phi-local fallback snippets and guidance.
+Service chat and TUI both use phi-managed pi `DefaultResourceLoader` instances.
+Service chat uses chat-scoped and global phi skill roots.
+TUI uses global phi skill roots.
+Tool metadata contributes prompt text through `promptSnippet` and `promptGuidelines`.
+Phi still provides fallback snippets for built-in file tools.
 
 ## Prompt sections
 
@@ -51,8 +52,7 @@ Service chat appends extra guidance:
 ## Skills in the prompt
 
 Phi uses the skills already loaded into the session resource loader.
-Skill file changes do not rewrite the current system prompt — the agent already knows files it created or edited in the current session.
-New sessions pick up the updated discovered skills.
+Skill changes take effect in new sessions.
 
 ## Message format
 

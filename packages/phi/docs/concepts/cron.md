@@ -1,22 +1,14 @@
 # Cron
 
-Cron is an internal trigger path.
-It targets a session inside a chat.
+Cron is a chat-scoped runtime feature.
 
 ## Scope
 
 - cron belongs to the service runtime
-- cron is not a message endpoint
-- cron runs inside chat workspace scope
-- cron triggers one target session
-- cron delivery binds to one explicit endpoint chat per job
-
-## Relation
-
-Cron bindings live in routes.
-The scheduler only fires the configured binding.
-The target session comes from the job config.
-Outbound delivery uses the job's stored `endpointChatId`.
+- cron runs inside one chat workspace
+- each job targets one session
+- each job stores one explicit outbound `endpointChatId`
+- scheduler and cron tools are part of the same feature
 
 ## Storage
 
@@ -32,18 +24,24 @@ Outbound delivery uses the job's stored `endpointChatId`.
 
 `cron.yaml` stores job metadata.
 Each job stores:
-- id
-- enabled flag
-- session id
-- endpoint chat id
-- prompt file path
-- one schedule (`cron` or `at`)
+- `id`
+- `enabled`
+- `sessionId`
+- `endpointChatId`
+- `prompt`
+- exactly one schedule: `cron` or `at`
 
-## Flow
+Prompt text lives in `cron/jobs/*.md`.
 
-1. load workspace timezone from `.phi/config.yaml`
-2. load cron jobs from `.phi/cron/cron.yaml`
-3. load the prompt file
-4. dispatch the cron trigger to the configured session
-5. deliver through the job's stored `endpointChatId`
-6. recompute next run
+## Runtime relation
+
+- the scheduler loads workspace timezone from `.phi/config.yaml`
+- the scheduler loads jobs from `.phi/cron/cron.yaml`
+- the scheduler loads the prompt file for each job
+- due jobs dispatch through `routes.dispatchCron(sessionId, ...)`
+- outbound delivery uses the job's stored `endpointChatId`
+
+## Tools relation
+
+Cron tools manage job files in the workspace.
+After changes, they reload the chat cron controller so the scheduler picks up the new state.

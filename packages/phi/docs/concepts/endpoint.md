@@ -11,12 +11,10 @@ Platform  ◄────►  Endpoint provider  ◄────►  Routes  ◄
 
 ## Scope
 
-An endpoint owns only:
+An endpoint owns:
 - connection lifecycle
 - inbound parsing
 - outbound formatting and delivery
-
-Endpoints do not own chats, sessions, or routing tables.
 
 ## Relation
 
