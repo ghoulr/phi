@@ -37,7 +37,8 @@ sessions:
     # Endpoint routes for this session
     routes:
       telegram:
-        id: <chat-id>
+        allowList:
+          - <chat-id>
         token: <telegram-token>
 
   alice-feishu:

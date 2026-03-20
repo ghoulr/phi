@@ -57,6 +57,7 @@ export interface CreatePhiAgentSessionOptions {
 	extensionFactories?: ExtensionFactory[];
 	printSystemPrompt?: boolean;
 	persistSession?: boolean;
+	sessionConfigId?: string;
 }
 
 export interface PhiRuntimeDependencies {
@@ -129,10 +130,16 @@ async function resolvePhiSessionContext(
 	sessionId: string,
 	phiConfig: PhiConfig,
 	chatSessionManagers: Map<string, ChatSessionManager>,
-	options: Pick<CreatePhiAgentSessionOptions, "extensionFactories">
+	options: Pick<
+		CreatePhiAgentSessionOptions,
+		"extensionFactories" | "sessionConfigId"
+	>
 ): Promise<ResolvedPhiSessionContext> {
 	const userHomeDir = homedir();
-	const sessionConfig = resolveSessionRuntimeConfig(phiConfig, sessionId);
+	const sessionConfig = resolveSessionRuntimeConfig(
+		phiConfig,
+		options.sessionConfigId ?? sessionId
+	);
 	const chatWorkspaceDir = resolveChatWorkspaceDirectory(
 		sessionConfig.workspace,
 		userHomeDir

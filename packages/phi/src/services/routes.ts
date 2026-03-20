@@ -19,7 +19,7 @@ export interface CronInput {
 }
 
 export interface SessionDelivery {
-	deliver(message: PhiMessage): Promise<void>;
+	deliver(routeId: string, message: PhiMessage): Promise<void>;
 }
 
 function createInteractiveRouteKey(
@@ -29,11 +29,23 @@ function createInteractiveRouteKey(
 	return `${endpointId}\u0000${routeId}`;
 }
 
+function createOutboundRouteKey(sessionId: string, endpointId: string): string {
+	return `${sessionId}\u0000${endpointId}`;
+}
+
 export class ServiceRoutes {
 	private readonly sessions = new Map<string, Session>();
 	private readonly interactiveRoutes = new Map<string, string>();
 	private readonly cronRoutes = new Map<string, string>();
 	private readonly outboundRoutes = new Map<string, SessionDelivery>();
+	private readonly sessionRouteIds = new Map<
+		string,
+		Map<string, Set<string>>
+	>();
+	private readonly activeInteractiveContexts = new Map<
+		string,
+		{ endpointId: string; routeId: string }
+	>();
 
 	public registerSession(sessionId: string, session: Session): () => void {
 		const existingSession = this.sessions.get(sessionId);
@@ -63,9 +75,30 @@ export class ServiceRoutes {
 			);
 		}
 		this.interactiveRoutes.set(routeKey, sessionId);
+		let endpointRouteIds = this.sessionRouteIds.get(sessionId);
+		if (!endpointRouteIds) {
+			endpointRouteIds = new Map<string, Set<string>>();
+			this.sessionRouteIds.set(sessionId, endpointRouteIds);
+		}
+		let routeIds = endpointRouteIds.get(endpointId);
+		if (!routeIds) {
+			routeIds = new Set<string>();
+			endpointRouteIds.set(endpointId, routeIds);
+		}
+		routeIds.add(routeId);
 		return () => {
 			if (this.interactiveRoutes.get(routeKey) === sessionId) {
 				this.interactiveRoutes.delete(routeKey);
+			}
+			const sessionEndpointRouteIds = this.sessionRouteIds.get(sessionId);
+			const sessionRouteIdsForEndpoint =
+				sessionEndpointRouteIds?.get(endpointId);
+			sessionRouteIdsForEndpoint?.delete(routeId);
+			if (sessionRouteIdsForEndpoint?.size === 0) {
+				sessionEndpointRouteIds?.delete(endpointId);
+			}
+			if (sessionEndpointRouteIds?.size === 0) {
+				this.sessionRouteIds.delete(sessionId);
 			}
 		};
 	}
@@ -84,19 +117,21 @@ export class ServiceRoutes {
 	}
 
 	public registerOutboundRoute(
+		endpointId: string,
 		sessionId: string,
 		delivery: SessionDelivery
 	): () => void {
-		const existingDelivery = this.outboundRoutes.get(sessionId);
+		const routeKey = createOutboundRouteKey(sessionId, endpointId);
+		const existingDelivery = this.outboundRoutes.get(routeKey);
 		if (existingDelivery) {
 			throw new Error(
-				`Duplicate outbound route for session ${sessionId}`
+				`Duplicate outbound route for session ${sessionId} on endpoint ${endpointId}`
 			);
 		}
-		this.outboundRoutes.set(sessionId, delivery);
+		this.outboundRoutes.set(routeKey, delivery);
 		return () => {
-			if (this.outboundRoutes.get(sessionId) === delivery) {
-				this.outboundRoutes.delete(sessionId);
+			if (this.outboundRoutes.get(routeKey) === delivery) {
+				this.outboundRoutes.delete(routeKey);
 			}
 		};
 	}
@@ -114,7 +149,17 @@ export class ServiceRoutes {
 				`No session configured for route ${routeId} on endpoint ${endpointId}`
 			);
 		}
-		await this.requireSession(sessionId).submitInteractive(input);
+		const previousContext = this.activeInteractiveContexts.get(sessionId);
+		this.activeInteractiveContexts.set(sessionId, { endpointId, routeId });
+		try {
+			await this.requireSession(sessionId).submitInteractive(input);
+		} finally {
+			if (previousContext) {
+				this.activeInteractiveContexts.set(sessionId, previousContext);
+			} else {
+				this.activeInteractiveContexts.delete(sessionId);
+			}
+		}
 	}
 
 	public async dispatchCron(
@@ -132,13 +177,55 @@ export class ServiceRoutes {
 		sessionId: string,
 		message: PhiMessage
 	): Promise<void> {
-		const delivery = this.outboundRoutes.get(sessionId);
+		const context =
+			this.activeInteractiveContexts.get(sessionId) ??
+			this.resolveDefaultOutboundContext(sessionId);
+		const delivery = this.outboundRoutes.get(
+			createOutboundRouteKey(sessionId, context.endpointId)
+		);
 		if (!delivery) {
 			throw new Error(
 				`No outbound route configured for session ${sessionId}`
 			);
 		}
-		await delivery.deliver(message);
+		await delivery.deliver(context.routeId, message);
+	}
+
+	private resolveDefaultOutboundContext(sessionId: string): {
+		endpointId: string;
+		routeId: string;
+	} {
+		const endpointRouteIds = this.sessionRouteIds.get(sessionId);
+		if (!endpointRouteIds || endpointRouteIds.size === 0) {
+			throw new Error(
+				`No outbound route configured for session ${sessionId}`
+			);
+		}
+		if (endpointRouteIds.size !== 1) {
+			throw new Error(
+				`No active outbound route for session ${sessionId}`
+			);
+		}
+		const firstEntry = endpointRouteIds.entries().next().value;
+		if (!firstEntry) {
+			throw new Error(
+				`No active outbound route for session ${sessionId}`
+			);
+		}
+		const endpointId = firstEntry[0];
+		const routeIds = firstEntry[1];
+		if (routeIds.size !== 1) {
+			throw new Error(
+				`No active outbound route for session ${sessionId}`
+			);
+		}
+		const routeId = routeIds.values().next().value;
+		if (!routeId) {
+			throw new Error(
+				`No active outbound route for session ${sessionId}`
+			);
+		}
+		return { endpointId, routeId };
 	}
 
 	private requireSession(sessionId: string): Session {

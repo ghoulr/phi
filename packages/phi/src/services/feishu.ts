@@ -219,6 +219,7 @@ export async function startFeishuEndpoint(
 	});
 
 	const unregisterRoutes: Array<() => void> = [];
+	const registeredOutboundSessions = new Set<string>();
 	for (const [routeId, target] of Object.entries(config.chatRoutes)) {
 		unregisterRoutes.push(
 			routes.registerInteractiveRoute(
@@ -227,46 +228,62 @@ export async function startFeishuEndpoint(
 				target.sessionId
 			)
 		);
+		if (registeredOutboundSessions.has(target.sessionId)) {
+			continue;
+		}
+		registeredOutboundSessions.add(target.sessionId);
 		unregisterRoutes.push(
-			routes.registerOutboundRoute(target.sessionId, {
-				deliver: async (message) => {
-					const idempotencyKey = createOutboundAuditKey(routeId);
-					const fields = {
-						routeId,
-						chatId: target.chatId,
-						sessionId: target.sessionId,
-						textLength: message.text?.length,
-						attachmentCount: message.attachments.length,
-					};
-					log.info("feishu.outbound.sending", fields);
-					try {
-						await provider.send(routeId, {
-							text: message.text,
-							attachments: message.attachments,
-						});
-						appendFeishuOutboundAssistantLog({
-							idempotencyKey,
-							routeId,
-							target,
-							message,
-						});
-						log.info("feishu.outbound.sent", fields);
-					} catch (error: unknown) {
-						const errorText = formatUserFacingErrorMessage(error);
-						appendFeishuOutboundErrorLog({
-							idempotencyKey,
-							routeId,
-							target,
-							errorText,
-						});
-						log.error("feishu.outbound.failed", {
-							...fields,
-							err: normalizeUnknownError(error),
-						});
-						throw error;
-					}
-				},
-			})
+			routes.registerOutboundRoute(
+				provider.instanceId,
+				target.sessionId,
+				{
+					deliver: async (activeRouteId, message) => {
+						const activeTarget = config.chatRoutes[activeRouteId];
+						if (!activeTarget) {
+							throw new Error(
+								`No feishu target configured for route ${activeRouteId}`
+							);
+						}
+						const idempotencyKey =
+							createOutboundAuditKey(activeRouteId);
+						const fields = {
+							routeId: activeRouteId,
+							chatId: activeTarget.chatId,
+							sessionId: activeTarget.sessionId,
+							textLength: message.text?.length,
+							attachmentCount: message.attachments.length,
+						};
+						log.info("feishu.outbound.sending", fields);
+						try {
+							await provider.send(activeRouteId, {
+								text: message.text,
+								attachments: message.attachments,
+							});
+							appendFeishuOutboundAssistantLog({
+								idempotencyKey,
+								routeId: activeRouteId,
+								target: activeTarget,
+								message,
+							});
+							log.info("feishu.outbound.sent", fields);
+						} catch (error: unknown) {
+							const errorText =
+								formatUserFacingErrorMessage(error);
+							appendFeishuOutboundErrorLog({
+								idempotencyKey,
+								routeId: activeRouteId,
+								target: activeTarget,
+								errorText,
+							});
+							log.error("feishu.outbound.failed", {
+								...fields,
+								err: normalizeUnknownError(error),
+							});
+							throw error;
+						}
+					},
+				}
+			)
 		);
 	}
 

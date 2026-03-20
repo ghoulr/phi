@@ -24,7 +24,7 @@ export interface PhiAgentConfig {
 
 export interface TelegramSessionRouteConfig {
 	enabled?: boolean;
-	id: number | string;
+	allowList: Array<number | string>;
 	token: string;
 }
 
@@ -57,8 +57,18 @@ export interface PhiConfig {
 	sessions?: Record<string, PhiSessionConfig>;
 }
 
+export interface ResolvedTelegramSessionTemplateConfig {
+	sessionId: string;
+	chatId: string;
+	workspace: string;
+	agentId: string;
+	telegramChatIds: string[];
+	token: string;
+}
+
 export interface ResolvedTelegramSessionServiceConfig {
 	sessionId: string;
+	configSessionId: string;
 	chatId: string;
 	workspace: string;
 	telegramChatId: string;
@@ -123,6 +133,30 @@ function toTelegramChatId(value: unknown, errorMessage: string): string {
 		return value;
 	}
 	throw new Error(errorMessage);
+}
+
+function toTelegramAllowList(value: unknown, sessionId: string): string[] {
+	if (!Array.isArray(value) || value.length === 0) {
+		throw new Error(
+			`Invalid telegram route for session ${sessionId}: missing allowList`
+		);
+	}
+	const allowList = value.map((entry) => {
+		return toTelegramChatId(
+			entry,
+			`Invalid telegram route for session ${sessionId}: invalid allowList entry`
+		);
+	});
+	const seen = new Set<string>();
+	for (const routeId of allowList) {
+		if (seen.has(routeId)) {
+			throw new Error(
+				`Invalid telegram route for session ${sessionId}: duplicate allowList entry ${routeId}`
+			);
+		}
+		seen.add(routeId);
+	}
+	return allowList;
 }
 
 function resolveChatRuntimeConfigFromEntry(
@@ -219,9 +253,9 @@ export function assertUniqueChatWorkspaces(
 	}
 }
 
-export function collectTelegramSessionServiceConfigs(
+export function collectTelegramSessionRouteTemplates(
 	phiConfig: PhiConfig
-): ResolvedTelegramSessionServiceConfig[] {
+): ResolvedTelegramSessionTemplateConfig[] {
 	assertUniqueChatWorkspaces(phiConfig);
 
 	const sessions = phiConfig.sessions;
@@ -229,7 +263,7 @@ export function collectTelegramSessionServiceConfigs(
 		throw new Error("Missing sessions configuration in phi config.");
 	}
 
-	const entries: ResolvedTelegramSessionServiceConfig[] = [];
+	const entries: ResolvedTelegramSessionTemplateConfig[] = [];
 	for (const [sessionId, sessionConfig] of Object.entries(sessions)) {
 		const telegramRoute = sessionConfig.routes?.telegram;
 		if (!telegramRoute || telegramRoute.enabled === false) {
@@ -245,9 +279,10 @@ export function collectTelegramSessionServiceConfigs(
 			sessionId,
 			chatId: resolvedSession.chatId,
 			workspace: resolvedSession.workspace,
-			telegramChatId: toTelegramChatId(
-				telegramRoute.id,
-				`Invalid telegram route for session ${sessionId}: missing id`
+			agentId: resolvedSession.agentId,
+			telegramChatIds: toTelegramAllowList(
+				telegramRoute.allowList,
+				sessionId
 			),
 			token: toNonEmptyString(
 				telegramRoute.token,

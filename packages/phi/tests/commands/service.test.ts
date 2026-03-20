@@ -30,7 +30,8 @@ function createTelegramSessionConfig(
 	overrides?: Partial<ResolvedTelegramSessionServiceConfig>
 ): ResolvedTelegramSessionServiceConfig {
 	return {
-		sessionId: "alice-telegram",
+		sessionId: "2026-03-19T00-00-00-000Z_alice-telegram",
+		configSessionId: "alice-telegram",
 		chatId: "user-alice",
 		workspace: "~/phi/workspaces/alice",
 		telegramChatId: "1001",
@@ -117,6 +118,9 @@ describe("service command", () => {
 				];
 			},
 			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
+				return [];
+			},
+			resolveTelegramWildcardRoutes() {
 				return [];
 			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
@@ -211,6 +215,9 @@ describe("service command", () => {
 			resolveFeishuSessions(): ResolvedFeishuSessionServiceConfig[] {
 				return [];
 			},
+			resolveTelegramWildcardRoutes() {
+				return [];
+			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
 				return [];
 			},
@@ -286,6 +293,9 @@ describe("service command", () => {
 						appSecret: "secret-2",
 					}),
 				];
+			},
+			resolveTelegramWildcardRoutes() {
+				return [];
 			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
 				return [];
@@ -375,6 +385,9 @@ describe("service command", () => {
 						appSecret: "secret-1",
 					}),
 				];
+			},
+			resolveTelegramWildcardRoutes() {
+				return [];
 			},
 			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
 				return [];

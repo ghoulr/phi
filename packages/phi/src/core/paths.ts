@@ -9,6 +9,16 @@ export function getPhiConfigFilePath(userHomeDir: string = homedir()): string {
 	return join(getPhiDir(userHomeDir), "phi.yaml");
 }
 
+export function getPhiRoutesDir(userHomeDir: string = homedir()): string {
+	return join(getPhiDir(userHomeDir), "routes");
+}
+
+export function getPhiTelegramRoutesFilePath(
+	userHomeDir: string = homedir()
+): string {
+	return join(getPhiRoutesDir(userHomeDir), "telegram.yaml");
+}
+
 export function getPhiSharedAuthFilePath(
 	userHomeDir: string = homedir()
 ): string {

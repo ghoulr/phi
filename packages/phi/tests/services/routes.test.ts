@@ -71,12 +71,17 @@ describe("service routes", () => {
 		).toEqual([{ text: "cron prompt", attachments: [] }]);
 	});
 
-	it("delivers outbound messages to the configured session route", async () => {
+	it("delivers outbound messages to the default session route", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice-telegram", {
-			async deliver(message): Promise<void> {
-				delivered.push(`telegram:${message.text}`);
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"42",
+			"alice-telegram"
+		);
+		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+			async deliver(routeId, message): Promise<void> {
+				delivered.push(`${routeId}:${message.text}`);
 			},
 		});
 
@@ -85,7 +90,46 @@ describe("service routes", () => {
 			attachments: [],
 		});
 
-		expect(delivered).toEqual(["telegram:done"]);
+		expect(delivered).toEqual(["42:done"]);
+	});
+
+	it("uses the active route context when one session has multiple routes", async () => {
+		const routes = new ServiceRoutes();
+		const delivered: string[] = [];
+		routes.registerSession(
+			"alice-telegram",
+			createSession({
+				async submitInteractive(): Promise<void> {
+					await routes.deliverOutbound("alice-telegram", {
+						text: "reply",
+						attachments: [],
+					});
+				},
+			})
+		);
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"42",
+			"alice-telegram"
+		);
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"43",
+			"alice-telegram"
+		);
+		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+			async deliver(routeId, message): Promise<void> {
+				delivered.push(`${routeId}:${message.text}`);
+			},
+		});
+
+		await routes.dispatchInteractive("telegram:bot-1", "43", {
+			text: "hello",
+			attachments: [],
+			sendTyping: async () => ({ ok: true }),
+		});
+
+		expect(delivered).toEqual(["43:reply"]);
 	});
 
 	it("fails when the outbound route does not exist", async () => {
@@ -101,16 +145,44 @@ describe("service routes", () => {
 		);
 	});
 
+	it("fails when outbound delivery is ambiguous without active route", async () => {
+		const routes = new ServiceRoutes();
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"42",
+			"alice-telegram"
+		);
+		routes.registerInteractiveRoute(
+			"telegram:bot-1",
+			"43",
+			"alice-telegram"
+		);
+		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+			async deliver(): Promise<void> {},
+		});
+
+		await expect(
+			routes.deliverOutbound("alice-telegram", {
+				text: "done",
+				attachments: [],
+			})
+		).rejects.toThrow(
+			"No active outbound route for session alice-telegram"
+		);
+	});
+
 	it("fails fast when duplicate outbound route is registered", () => {
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("alice-telegram", {
+		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
 			async deliver(): Promise<void> {},
 		});
 
 		expect(() =>
-			routes.registerOutboundRoute("alice-telegram", {
+			routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
 				async deliver(): Promise<void> {},
 			})
-		).toThrow("Duplicate outbound route for session alice-telegram");
+		).toThrow(
+			"Duplicate outbound route for session alice-telegram on endpoint telegram:bot-1"
+		);
 	});
 });

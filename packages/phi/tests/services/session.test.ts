@@ -279,8 +279,9 @@ describe("PiSessionRuntime", () => {
 	it("delivers cron instant sends through the session route", async () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
-		routes.registerOutboundRoute("alice-cron", {
-			async deliver(message): Promise<void> {
+		routes.registerInteractiveRoute("cron:test", "default", "alice-cron");
+		routes.registerOutboundRoute("cron:test", "alice-cron", {
+			async deliver(_routeId, message): Promise<void> {
 				delivered.push(message.text ?? "");
 			},
 		});

@@ -463,6 +463,7 @@ export interface PiSessionRuntimeDependencies {
 
 export interface CreatePiSessionRuntimeParams {
 	sessionId: string;
+	configSessionId?: string;
 	chatId: string;
 	phiConfig: PhiConfig;
 	runtime: SessionRuntime<AgentSession>;
@@ -516,6 +517,8 @@ export class PiSessionRuntime implements Session {
 			this.params.phiConfig,
 			{
 				persistSession: false,
+				sessionConfigId:
+					this.params.configSessionId ?? this.params.sessionId,
 				extensionFactories: createCronMessagingExtensionFactories({
 					sessionId: this.params.sessionId,
 					routes: this.params.routes,
@@ -544,6 +547,8 @@ export class PiSessionRuntime implements Session {
 			this.params.phiConfig,
 			{
 				persistSession: false,
+				sessionConfigId:
+					this.params.configSessionId ?? this.params.sessionId,
 			}
 		);
 		try {

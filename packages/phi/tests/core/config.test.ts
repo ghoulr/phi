@@ -7,7 +7,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	assertUniqueChatWorkspaces,
 	collectFeishuSessionServiceConfigs,
-	collectTelegramSessionServiceConfigs,
+	collectTelegramSessionRouteTemplates,
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
@@ -43,19 +43,21 @@ describe("phi config", () => {
 					"    agent: main",
 					"    routes:",
 					"      telegram:",
-					"        id: -10001",
+					"        allowList:",
+					"          - -10001",
 					"        token: bot-token",
 				].join("\n"),
 				"utf-8"
 			);
 
 			const config = loadPhiConfig(configPath);
-			expect(collectTelegramSessionServiceConfigs(config)).toEqual([
+			expect(collectTelegramSessionRouteTemplates(config)).toEqual([
 				{
 					sessionId: "alice-telegram",
 					chatId: "user-alice",
 					workspace: "~/phi/workspaces/alice",
-					telegramChatId: "-10001",
+					agentId: "main",
+					telegramChatIds: ["-10001"],
 					token: "bot-token",
 				},
 			]);
@@ -66,7 +68,7 @@ describe("phi config", () => {
 
 	it("skips sessions without telegram route", () => {
 		expect(
-			collectTelegramSessionServiceConfigs({
+			collectTelegramSessionRouteTemplates({
 				chats: {
 					shared: {
 						workspace: "~/active",
@@ -82,7 +84,7 @@ describe("phi config", () => {
 						agent: "support",
 						routes: {
 							telegram: {
-								id: "1002",
+								allowList: ["1002"],
 								token: "token",
 							},
 						},
@@ -94,7 +96,8 @@ describe("phi config", () => {
 				sessionId: "session-active",
 				chatId: "shared",
 				workspace: "~/active",
-				telegramChatId: "1002",
+				agentId: "support",
+				telegramChatIds: ["1002"],
 				token: "token",
 			},
 		]);
@@ -198,7 +201,7 @@ describe("phi config", () => {
 
 	it("fails when sessions mapping is missing", () => {
 		expect(() =>
-			collectTelegramSessionServiceConfigs({
+			collectTelegramSessionRouteTemplates({
 				chats: {
 					alice: { workspace: "~/alice" },
 				},
@@ -208,7 +211,7 @@ describe("phi config", () => {
 
 	it("fails when telegram route token is missing", () => {
 		expect(() =>
-			collectTelegramSessionServiceConfigs({
+			collectTelegramSessionRouteTemplates({
 				chats: {
 					alice: { workspace: "~/alice" },
 				},
@@ -218,7 +221,7 @@ describe("phi config", () => {
 						agent: "main",
 						routes: {
 							telegram: {
-								id: "1001",
+								allowList: ["1001"],
 								token: "",
 							},
 						},
@@ -227,6 +230,116 @@ describe("phi config", () => {
 			})
 		).toThrow(
 			"Invalid telegram route for session alice-main: missing token"
+		);
+	});
+
+	it("collects multiple telegram allowList entries", () => {
+		expect(
+			collectTelegramSessionRouteTemplates({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								allowList: ["1001", "1002"],
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toEqual([
+			{
+				sessionId: "alice-main",
+				chatId: "alice",
+				workspace: "~/alice",
+				agentId: "main",
+				telegramChatIds: ["1001", "1002"],
+				token: "token",
+			},
+		]);
+	});
+
+	it("fails when telegram allowList is missing", () => {
+		expect(() =>
+			collectTelegramSessionRouteTemplates({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								allowList: [],
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toThrow(
+			"Invalid telegram route for session alice-main: missing allowList"
+		);
+	});
+
+	it("collects telegram wildcard allowList entries", () => {
+		expect(
+			collectTelegramSessionRouteTemplates({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								allowList: ["*"],
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toEqual([
+			{
+				sessionId: "alice-main",
+				chatId: "alice",
+				workspace: "~/alice",
+				agentId: "main",
+				telegramChatIds: ["*"],
+				token: "token",
+			},
+		]);
+	});
+
+	it("fails when telegram allowList has duplicates", () => {
+		expect(() =>
+			collectTelegramSessionRouteTemplates({
+				chats: {
+					alice: { workspace: "~/alice" },
+				},
+				sessions: {
+					"alice-main": {
+						chat: "alice",
+						agent: "main",
+						routes: {
+							telegram: {
+								allowList: ["1001", "1001"],
+								token: "token",
+							},
+						},
+					},
+				},
+			})
+		).toThrow(
+			"Invalid telegram route for session alice-main: duplicate allowList entry 1001"
 		);
 	});
 

@@ -190,6 +190,46 @@ describe("startTelegramEndpoint", () => {
 		expect(bot.sentTexts).toEqual([{ chatId: "42", text: "done" }]);
 	});
 
+	it("routes replies through the active telegram allowList route", async () => {
+		const bot = new FakeTelegramBot([
+			{ routeId: "43", messageId: 1, text: "hello" },
+		]);
+		const routes = new ServiceRoutes();
+		routes.registerSession(
+			"alice-telegram",
+			createSession({
+				async submitInteractive(): Promise<void> {
+					await routes.deliverOutbound("alice-telegram", {
+						text: "reply",
+						attachments: [],
+					});
+				},
+			})
+		);
+
+		const endpoint = await startTelegramEndpoint(
+			routes,
+			{
+				token: "bot-token",
+				chatRoutes: {
+					"42": createRouteTarget({
+						sessionId: "alice-telegram",
+						chatId: "alice",
+					}),
+					"43": createRouteTarget({
+						sessionId: "alice-telegram",
+						chatId: "alice",
+					}),
+				},
+			},
+			createBotFactory(bot)
+		);
+		await endpoint.done;
+		await endpoint.stop();
+
+		expect(bot.sentTexts).toEqual([{ chatId: "43", text: "reply" }]);
+	});
+
 	it("unregisters routes when the bot exits with error", async () => {
 		const bot = new FailingTelegramBot([], "telegram crashed");
 		const routes = new ServiceRoutes();

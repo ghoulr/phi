@@ -6,13 +6,19 @@ import {
 } from "@phi/core/session-executor";
 import {
 	collectFeishuSessionServiceConfigs,
-	collectTelegramSessionServiceConfigs,
 	resolveCronSessionServiceConfigs,
 	type PhiConfig,
 	type ResolvedCronSessionServiceConfig,
 	type ResolvedFeishuSessionServiceConfig,
 	type ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
+import {
+	bindTelegramChatRoute,
+	createTelegramRouteRegistry,
+	resolveTelegramSessionServiceConfigs,
+	resolveTelegramWildcardRouteConfigs,
+	type ResolvedTelegramWildcardRouteConfig,
+} from "@phi/core/telegram-routes";
 import { getPhiLogger } from "@phi/core/logger";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import type { SessionRuntime } from "@phi/core/runtime";
@@ -29,7 +35,9 @@ import {
 	startTelegramEndpoint as startTelegramService,
 	type ResolvedTelegramEndpointConfig,
 	type RunningTelegramEndpoint,
+	type TelegramEndpointDependencies,
 	type TelegramRouteTarget,
+	type TelegramWildcardRouteTarget,
 } from "@phi/services/telegram";
 
 interface RunningServicePart {
@@ -46,6 +54,9 @@ export interface ServiceCommandDependencies {
 	resolveFeishuSessions(
 		phiConfig: PhiConfig
 	): ResolvedFeishuSessionServiceConfig[];
+	resolveTelegramWildcardRoutes(
+		phiConfig: PhiConfig
+	): ResolvedTelegramWildcardRouteConfig[];
 	resolveCronSessions(
 		phiConfig: PhiConfig
 	): ResolvedCronSessionServiceConfig[];
@@ -54,6 +65,7 @@ export interface ServiceCommandDependencies {
 	createRoutes(): ServiceRoutes;
 	createSession(params: {
 		sessionId: string;
+		configSessionId?: string;
 		chatId: string;
 		phiConfig: PhiConfig;
 		runtime: SessionRuntime<AgentSession>;
@@ -63,7 +75,8 @@ export interface ServiceCommandDependencies {
 	}): Session;
 	startTelegramEndpoint(
 		routes: ServiceRoutes,
-		config: ResolvedTelegramEndpointConfig
+		config: ResolvedTelegramEndpointConfig,
+		dependencies?: TelegramEndpointDependencies
 	): Promise<RunningTelegramEndpoint>;
 	startFeishuEndpoint(
 		routes: ServiceRoutes,
@@ -81,12 +94,17 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	resolveTelegramSessions(
 		phiConfig: PhiConfig
 	): ResolvedTelegramSessionServiceConfig[] {
-		return collectTelegramSessionServiceConfigs(phiConfig);
+		return resolveTelegramSessionServiceConfigs(phiConfig);
 	},
 	resolveFeishuSessions(
 		phiConfig: PhiConfig
 	): ResolvedFeishuSessionServiceConfig[] {
 		return collectFeishuSessionServiceConfigs(phiConfig);
+	},
+	resolveTelegramWildcardRoutes(
+		phiConfig: PhiConfig
+	): ResolvedTelegramWildcardRouteConfig[] {
+		return resolveTelegramWildcardRouteConfigs(phiConfig);
 	},
 	resolveCronSessions(
 		phiConfig: PhiConfig
@@ -107,9 +125,10 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	},
 	startTelegramEndpoint(
 		routes: ServiceRoutes,
-		config: ResolvedTelegramEndpointConfig
+		config: ResolvedTelegramEndpointConfig,
+		dependencies?: TelegramEndpointDependencies
 	): Promise<RunningTelegramEndpoint> {
-		return startTelegramService(routes, config);
+		return startTelegramService(routes, config, dependencies);
 	},
 	startFeishuEndpoint(
 		routes: ServiceRoutes,
@@ -132,37 +151,62 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	},
 };
 
-function buildTelegramEndpointConfigs(
-	sessionConfigs: ResolvedTelegramSessionServiceConfig[]
-): ResolvedTelegramEndpointConfig[] {
+function buildTelegramEndpointConfigs(params: {
+	sessionConfigs: ResolvedTelegramSessionServiceConfig[];
+	wildcardConfigs: ResolvedTelegramWildcardRouteConfig[];
+}): ResolvedTelegramEndpointConfig[] {
 	const groupedRoutes = new Map<
 		string,
-		Record<string, TelegramRouteTarget>
+		{
+			chatRoutes: Record<string, TelegramRouteTarget>;
+			wildcardRoute?: TelegramWildcardRouteTarget;
+		}
 	>();
 
-	for (const sessionConfig of sessionConfigs) {
-		let routes = groupedRoutes.get(sessionConfig.token);
-		if (!routes) {
-			routes = {};
-			groupedRoutes.set(sessionConfig.token, routes);
+	for (const sessionConfig of params.sessionConfigs) {
+		let groupedConfig = groupedRoutes.get(sessionConfig.token);
+		if (!groupedConfig) {
+			groupedConfig = { chatRoutes: {} };
+			groupedRoutes.set(sessionConfig.token, groupedConfig);
 		}
 
-		if (routes[sessionConfig.telegramChatId]) {
+		if (groupedConfig.chatRoutes[sessionConfig.telegramChatId]) {
 			throw new Error(
 				`Duplicate telegram route for token ${sessionConfig.token} and chat id ${sessionConfig.telegramChatId}`
 			);
 		}
-		routes[sessionConfig.telegramChatId] = {
+		groupedConfig.chatRoutes[sessionConfig.telegramChatId] = {
 			sessionId: sessionConfig.sessionId,
 			chatId: sessionConfig.chatId,
 			workspace: sessionConfig.workspace,
 		};
 	}
 
-	return Array.from(groupedRoutes.entries()).map(([token, chatRoutes]) => ({
-		token,
-		chatRoutes,
-	}));
+	for (const wildcardConfig of params.wildcardConfigs) {
+		let groupedConfig = groupedRoutes.get(wildcardConfig.token);
+		if (!groupedConfig) {
+			groupedConfig = { chatRoutes: {} };
+			groupedRoutes.set(wildcardConfig.token, groupedConfig);
+		}
+		if (groupedConfig.wildcardRoute) {
+			throw new Error(
+				`Duplicate telegram wildcard route for token ${wildcardConfig.token}`
+			);
+		}
+		groupedConfig.wildcardRoute = {
+			configSessionId: wildcardConfig.configSessionId,
+			chatId: wildcardConfig.chatId,
+			workspace: wildcardConfig.workspace,
+		};
+	}
+
+	return Array.from(groupedRoutes.entries()).map(
+		([token, { chatRoutes, wildcardRoute }]) => ({
+			token,
+			chatRoutes,
+			wildcardRoute,
+		})
+	);
 }
 
 function buildFeishuEndpointConfigs(
@@ -205,9 +249,19 @@ function buildFeishuEndpointConfigs(
 }
 
 function collectServiceSessions(
-	...groups: Array<Array<{ sessionId: string; chatId: string }>>
-): Array<{ sessionId: string; chatId: string }> {
-	const sessions: Array<{ sessionId: string; chatId: string }> = [];
+	...groups: Array<
+		Array<{
+			sessionId: string;
+			configSessionId?: string;
+			chatId: string;
+		}>
+	>
+): Array<{ sessionId: string; configSessionId?: string; chatId: string }> {
+	const sessions: Array<{
+		sessionId: string;
+		configSessionId?: string;
+		chatId: string;
+	}> = [];
 	const seenSessionIds = new Set<string>();
 	for (const group of groups) {
 		for (const sessionConfig of group) {
@@ -217,6 +271,7 @@ function collectServiceSessions(
 			seenSessionIds.add(sessionConfig.sessionId);
 			sessions.push({
 				sessionId: sessionConfig.sessionId,
+				configSessionId: sessionConfig.configSessionId,
 				chatId: sessionConfig.chatId,
 			});
 		}
@@ -253,10 +308,19 @@ export async function runServiceCommand(
 		...defaultServiceCommandDependencies,
 		...dependencies,
 	};
-	const telegramSessions =
-		resolvedDependencies.resolveTelegramSessions(phiConfig);
+	const telegramRouteRegistry =
+		dependencies.resolveTelegramSessions === undefined &&
+		dependencies.resolveTelegramWildcardRoutes === undefined
+			? createTelegramRouteRegistry(phiConfig)
+			: undefined;
+	const telegramSessions = telegramRouteRegistry
+		? telegramRouteRegistry.resolveSessionServiceConfigs()
+		: resolvedDependencies.resolveTelegramSessions(phiConfig);
 	const feishuSessions =
 		resolvedDependencies.resolveFeishuSessions(phiConfig);
+	const telegramWildcardRoutes = telegramRouteRegistry
+		? telegramRouteRegistry.resolveWildcardRouteConfigs()
+		: resolvedDependencies.resolveTelegramWildcardRoutes(phiConfig);
 	const cronSessions = resolvedDependencies.resolveCronSessions(phiConfig);
 	const sessionExecutor = resolvedDependencies.createSessionExecutor();
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
@@ -272,37 +336,54 @@ export async function runServiceCommand(
 		cronSessionCount: cronSessions.length,
 		serviceSessionCount: serviceSessions.length,
 	});
-	const telegramEndpointConfigs =
-		buildTelegramEndpointConfigs(telegramSessions);
+	const telegramEndpointConfigs = buildTelegramEndpointConfigs({
+		sessionConfigs: telegramSessions,
+		wildcardConfigs: telegramWildcardRoutes,
+	});
 	const feishuEndpointConfigs = buildFeishuEndpointConfigs(feishuSessions);
 
 	const runningServices: RunningServicePart[] = [];
 	const sessions: Session[] = [];
 	const unregisterHandlers: Array<() => void> = [];
+	const sessionRuntimes = new Map<string, Session>();
+	const ensureServiceSession = (serviceSession: {
+		sessionId: string;
+		configSessionId?: string;
+		chatId: string;
+	}): Session => {
+		const existingSession = sessionRuntimes.get(serviceSession.sessionId);
+		if (existingSession) {
+			return existingSession;
+		}
+		const session = resolvedDependencies.createSession({
+			sessionId: serviceSession.sessionId,
+			configSessionId: serviceSession.configSessionId,
+			chatId: serviceSession.chatId,
+			phiConfig,
+			runtime,
+			sessionExecutor,
+			routes,
+			reloadRegistry,
+		});
+		sessionRuntimes.set(serviceSession.sessionId, session);
+		sessions.push(session);
+		unregisterHandlers.push(
+			routes.registerSession(serviceSession.sessionId, session)
+		);
+		unregisterHandlers.push(
+			reloadRegistry.register(serviceSession.chatId, {
+				validate: () => session.validateReload(),
+				apply: async () => {
+					session.invalidate();
+					return ["session"];
+				},
+			})
+		);
+		return session;
+	};
 	try {
 		for (const serviceSession of serviceSessions) {
-			const session = resolvedDependencies.createSession({
-				sessionId: serviceSession.sessionId,
-				chatId: serviceSession.chatId,
-				phiConfig,
-				runtime,
-				sessionExecutor,
-				routes,
-				reloadRegistry,
-			});
-			sessions.push(session);
-			unregisterHandlers.push(
-				routes.registerSession(serviceSession.sessionId, session)
-			);
-			unregisterHandlers.push(
-				reloadRegistry.register(serviceSession.chatId, {
-					validate: () => session.validateReload(),
-					apply: async () => {
-						session.invalidate();
-						return ["session"];
-					},
-				})
-			);
+			ensureServiceSession(serviceSession);
 		}
 
 		for (const sessionConfig of cronSessions) {
@@ -317,15 +398,40 @@ export async function runServiceCommand(
 		for (const endpointConfig of telegramEndpointConfigs) {
 			log.info("service.telegram.starting", {
 				routeCount: Object.keys(endpointConfig.chatRoutes).length,
+				wildcardEnabled: endpointConfig.wildcardRoute !== undefined,
 			});
 			const runningEndpoint =
 				await resolvedDependencies.startTelegramEndpoint(
 					routes,
-					endpointConfig
+					endpointConfig,
+					{
+						resolveRouteTarget: async (routeId) => {
+							const sessionConfig = bindTelegramChatRoute({
+								phiConfig,
+								token: endpointConfig.token,
+								chatId: routeId,
+								registry: telegramRouteRegistry,
+							});
+							if (!sessionConfig) {
+								return undefined;
+							}
+							ensureServiceSession({
+								sessionId: sessionConfig.sessionId,
+								configSessionId: sessionConfig.configSessionId,
+								chatId: sessionConfig.chatId,
+							});
+							return {
+								sessionId: sessionConfig.sessionId,
+								chatId: sessionConfig.chatId,
+								workspace: sessionConfig.workspace,
+							};
+						},
+					}
 				);
 			runningServices.push(runningEndpoint);
 			log.info("service.telegram.started", {
 				routeCount: Object.keys(endpointConfig.chatRoutes).length,
+				wildcardEnabled: endpointConfig.wildcardRoute !== undefined,
 			});
 		}
 
