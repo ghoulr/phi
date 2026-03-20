@@ -203,10 +203,6 @@ async function resolvePhiSessionContext(
 	};
 }
 
-function getSessionToolNames(session: AgentSession): string[] {
-	return session.getActiveToolNames();
-}
-
 function printInjectedSystemPrompt(systemPrompt: string): void {
 	console.log(
 		[
@@ -285,7 +281,6 @@ export async function createPhiAgentSession(
 		workspacePath: context.chatWorkspaceDir,
 		skills: context.resourceLoader.getSkills().skills,
 		memoryFilePath: context.chatWorkspaceLayout.memoryFilePath,
-		toolNames: getSessionToolNames(session),
 	});
 	if (options.printSystemPrompt) {
 		printInjectedSystemPrompt(systemPrompt);

@@ -8,24 +8,28 @@ import {
 import { buildPhiMemoryPromptPaths } from "@phi/core/memory-paths";
 import { limitSkillsForPrompt } from "@phi/core/skills";
 
+export interface PhiSystemPromptTool {
+	name: string;
+	promptSnippet?: string;
+	promptGuidelines?: string[];
+}
+
 export interface BuildPhiSystemPromptParams {
 	assistantName: string;
 	workspacePath: string;
 	skills: Skill[];
 	memoryFilePath: string;
-	toolNames: string[];
+	tools: PhiSystemPromptTool[];
 	includeWorkspaceConfigGuidance?: boolean;
 }
 
 const DEFAULT_MEMORY_FILE_HEADER = "# MEMORY";
 
-const TOOL_DESCRIPTION_MAP: Record<string, string> = {
+const BUILTIN_TOOL_SNIPPETS: Record<string, string> = {
 	read: "Read file contents",
 	bash: "Execute bash commands (ls, rg, find, etc.)",
 	edit: "Make surgical edits to files (exact text replacement)",
 	write: "Create or overwrite files",
-	reload: "Validate workspace changes and schedule them to apply after the current reply ends",
-	send: "Send a user-visible message immediately or stage it for your final output",
 };
 
 interface ToolGuidelineRule {
@@ -33,7 +37,7 @@ interface ToolGuidelineRule {
 	matches(toolNames: Set<string>): boolean;
 }
 
-const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
+const BUILTIN_TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 	{
 		line: "Use read to examine files before editing.",
 		matches(toolNames: Set<string>): boolean {
@@ -59,12 +63,6 @@ const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 		},
 	},
 	{
-		line: "Use send for attachments, mentions, or explicit user-visible delivery.",
-		matches(toolNames: Set<string>): boolean {
-			return toolNames.has("send");
-		},
-	},
-	{
 		line: "For destructive actions, be explicit and cautious.",
 		matches(toolNames: Set<string>): boolean {
 			return (
@@ -76,43 +74,99 @@ const TOOL_GUIDELINE_RULES: readonly ToolGuidelineRule[] = [
 	},
 ];
 
-function normalizeToolNames(toolNames: string[]): string[] {
+function normalizeGuidelines(guidelines: string[] | undefined): string[] {
 	const unique = new Set<string>();
-	const normalizedNames: string[] = [];
-	for (const toolName of toolNames) {
-		const normalized = toolName.trim();
+	const normalizedGuidelines: string[] = [];
+	for (const guideline of guidelines ?? []) {
+		const normalized = guideline.trim();
 		if (!normalized || unique.has(normalized)) {
 			continue;
 		}
 		unique.add(normalized);
-		normalizedNames.push(normalized);
+		normalizedGuidelines.push(normalized);
 	}
-	return normalizedNames;
+	return normalizedGuidelines;
 }
 
-function buildToolsText(normalizedToolNames: string[]): string {
-	const lines: string[] = [];
-	for (const toolName of normalizedToolNames) {
-		const description = TOOL_DESCRIPTION_MAP[toolName.toLowerCase()];
-		if (!description) {
+function normalizeTools(tools: PhiSystemPromptTool[]): PhiSystemPromptTool[] {
+	const normalizedTools = new Map<string, PhiSystemPromptTool>();
+	for (const tool of tools) {
+		const name = tool.name.trim();
+		if (!name) {
 			continue;
 		}
-		lines.push(`- ${toolName}: ${description}`);
+		const key = name.toLowerCase();
+		const existing = normalizedTools.get(key);
+		const promptSnippet = tool.promptSnippet?.trim();
+		const promptGuidelines = normalizeGuidelines(tool.promptGuidelines);
+		if (!existing) {
+			normalizedTools.set(key, {
+				name,
+				promptSnippet,
+				promptGuidelines,
+			});
+			continue;
+		}
+		normalizedTools.set(key, {
+			name: existing.name,
+			promptSnippet: promptSnippet || existing.promptSnippet,
+			promptGuidelines: normalizeGuidelines([
+				...(existing.promptGuidelines ?? []),
+				...promptGuidelines,
+			]),
+		});
 	}
+	return Array.from(normalizedTools.values());
+}
+
+function resolveToolSnippet(tool: PhiSystemPromptTool): string | undefined {
+	if (tool.promptSnippet) {
+		return tool.promptSnippet;
+	}
+	return BUILTIN_TOOL_SNIPPETS[tool.name.toLowerCase()];
+}
+
+function buildToolsText(tools: PhiSystemPromptTool[]): string {
+	const lines = tools
+		.map((tool) => {
+			const snippet = resolveToolSnippet(tool);
+			if (!snippet) {
+				return undefined;
+			}
+			return `- ${tool.name}: ${snippet}`;
+		})
+		.filter((line): line is string => line !== undefined);
 	if (lines.length === 0) {
 		return "- (none)";
 	}
 	return lines.join("\n");
 }
 
-function buildToolGuidance(normalizedToolNames: Set<string>): string[] {
+function buildGuidelines(tools: PhiSystemPromptTool[]): string {
 	const lines: string[] = [];
-	for (const rule of TOOL_GUIDELINE_RULES) {
+	const unique = new Set<string>();
+	const addLine = (line: string): void => {
+		const normalized = line.trim();
+		if (!normalized || unique.has(normalized)) {
+			return;
+		}
+		unique.add(normalized);
+		lines.push(`- ${normalized}`);
+	};
+	const normalizedToolNames = new Set(
+		tools.map((tool) => tool.name.toLowerCase())
+	);
+	for (const rule of BUILTIN_TOOL_GUIDELINE_RULES) {
 		if (rule.matches(normalizedToolNames)) {
-			lines.push(rule.line);
+			addLine(rule.line);
 		}
 	}
-	return lines;
+	for (const tool of tools) {
+		for (const guideline of normalizeGuidelines(tool.promptGuidelines)) {
+			addLine(guideline);
+		}
+	}
+	return lines.join("\n");
 }
 
 function buildSkillsText(skills: Skill[]): string {
@@ -205,11 +259,9 @@ export function buildPhiSystemPrompt(
 ): string {
 	const skillsText = buildSkillsText(params.skills);
 	const memoryText = readMemoryText(params.memoryFilePath);
-	const normalizedToolNames = normalizeToolNames(params.toolNames);
-	const toolsText = buildToolsText(normalizedToolNames);
-	const toolGuidance = buildToolGuidance(
-		new Set(normalizedToolNames.map((toolName) => toolName.toLowerCase()))
-	);
+	const normalizedTools = normalizeTools(params.tools);
+	const toolsText = buildToolsText(normalizedTools);
+	const guidelinesText = buildGuidelines(normalizedTools);
 
 	const lines = [
 		`You are ${params.assistantName}, a personal assistant. Be concise.`,
@@ -235,14 +287,8 @@ export function buildPhiSystemPrompt(
 			memoryText,
 		})
 	);
-	lines.push("## Tools", toolsText, "");
-	if (toolGuidance.length > 0) {
-		lines.push("Tool guidance:");
-		for (const guideline of toolGuidance) {
-			lines.push(`- ${guideline}`);
-		}
-		lines.push("");
-	}
+	appendSection(lines, "## Tools", toolsText);
+	appendSection(lines, "## Guidelines", guidelinesText);
 	appendSection(lines, "## Message Format", buildMessageFormatSection());
 	return lines.join("\n").trim();
 }

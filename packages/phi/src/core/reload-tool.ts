@@ -12,6 +12,8 @@ export function createReloadTool(
 		label: "Reload",
 		description:
 			"Validate workspace changes and schedule them to apply after the current reply ends.",
+		promptSnippet:
+			"Validate workspace changes and schedule them to apply after the current reply ends",
 		parameters: Type.Object({}),
 		execute: async () => {
 			const result = await reloadRegistry.request(chatId);

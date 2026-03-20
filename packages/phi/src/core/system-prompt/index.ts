@@ -5,5 +5,9 @@ export {
 export {
 	buildPhiSystemPrompt,
 	type BuildPhiSystemPromptParams,
+	type PhiSystemPromptTool,
 } from "./prompt";
-export { applyPhiSystemPromptOverride } from "./override";
+export {
+	applyPhiSystemPromptOverride,
+	type PhiSystemPromptBuilder,
+} from "./override";

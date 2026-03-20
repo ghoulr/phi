@@ -33,7 +33,12 @@ describe("buildPhiSystemPrompt", () => {
 					},
 				],
 				memoryFilePath: filePath,
-				toolNames: ["read", "edit", "write", "bash"],
+				tools: [
+					{ name: "read" },
+					{ name: "edit" },
+					{ name: "write" },
+					{ name: "bash" },
+				],
 			});
 
 			expect(
@@ -46,13 +51,15 @@ describe("buildPhiSystemPrompt", () => {
 			const skillsIndex = prompt.indexOf("## Skills");
 			const memoryIndex = prompt.indexOf("## Memory");
 			const toolsIndex = prompt.indexOf("## Tools");
+			const guidelinesIndex = prompt.indexOf("## Guidelines");
 			const messageFormatIndex = prompt.indexOf("## Message Format");
 
 			expect(workspaceIndex).toBeGreaterThanOrEqual(0);
 			expect(skillsIndex).toBeGreaterThan(workspaceIndex);
 			expect(memoryIndex).toBeGreaterThan(skillsIndex);
 			expect(toolsIndex).toBeGreaterThan(memoryIndex);
-			expect(messageFormatIndex).toBeGreaterThan(toolsIndex);
+			expect(guidelinesIndex).toBeGreaterThan(toolsIndex);
+			expect(messageFormatIndex).toBeGreaterThan(guidelinesIndex);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -67,7 +74,7 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read"],
+				tools: [{ name: "read" }],
 			});
 
 			expect(prompt.includes("## Skills")).toBe(false);
@@ -94,7 +101,7 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read"],
+				tools: [{ name: "read" }],
 			});
 
 			expect(prompt.includes("Current MEMORY.md")).toBe(true);
@@ -113,7 +120,7 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read"],
+				tools: [{ name: "read" }],
 			});
 
 			expect(prompt.includes(filePath)).toBe(true);
@@ -132,7 +139,14 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read", "reload"],
+				tools: [
+					{ name: "read" },
+					{
+						name: "reload",
+						promptSnippet:
+							"Validate workspace changes and schedule them to apply after the current reply ends",
+					},
+				],
 			});
 
 			expect(
@@ -158,6 +172,11 @@ describe("buildPhiSystemPrompt", () => {
 					"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends."
 				)
 			).toBe(true);
+			expect(
+				prompt.includes(
+					"- reload: Validate workspace changes and schedule them to apply after the current reply ends"
+				)
+			).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -172,7 +191,7 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read"],
+				tools: [{ name: "read" }],
 				includeWorkspaceConfigGuidance: false,
 			});
 
@@ -186,7 +205,7 @@ describe("buildPhiSystemPrompt", () => {
 		}
 	});
 
-	it("omits non built-in extension tools from tools section", () => {
+	it("includes custom tool snippets and guidelines when provided", () => {
 		const { dir, filePath } = createMemoryFile("# MEMORY\n");
 
 		try {
@@ -195,11 +214,38 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["websearch", "webfetch"],
+				tools: [
+					{
+						name: "websearch",
+						promptSnippet:
+							"Search the web for relevant pages, summaries, and highlights",
+						promptGuidelines: [
+							"Use websearch to discover relevant pages before choosing which URL to read in full.",
+						],
+					},
+					{
+						name: "webfetch",
+						promptSnippet:
+							"Fetch the content of a specific URL when you already know where to read",
+					},
+				],
 			});
 
-			expect(prompt.includes("- websearch:")).toBe(false);
-			expect(prompt.includes("- webfetch:")).toBe(false);
+			expect(
+				prompt.includes(
+					"- websearch: Search the web for relevant pages, summaries, and highlights"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"- webfetch: Fetch the content of a specific URL when you already know where to read"
+				)
+			).toBe(true);
+			expect(
+				prompt.includes(
+					"Use websearch to discover relevant pages before choosing which URL to read in full."
+				)
+			).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -214,14 +260,28 @@ describe("buildPhiSystemPrompt", () => {
 				workspacePath: "/workspace/alice",
 				skills: [],
 				memoryFilePath: filePath,
-				toolNames: ["read", "send"],
+				tools: [
+					{ name: "read" },
+					{
+						name: "send",
+						promptSnippet:
+							"Send a user-visible message immediately or stage one deferred message for agent run end",
+						promptGuidelines: [
+							"Use send for attachments, mentions, or explicit user-visible delivery.",
+							"Use send(instant: true) to send a separate message immediately.",
+							"Without instant: true, send stages one deferred message for agent run end.",
+						],
+					},
+				],
 			});
 
 			expect(
 				prompt.includes(
-					"- send: Send a user-visible message immediately or stage it for your final output"
+					"- send: Send a user-visible message immediately or stage one deferred message for agent run end"
 				)
 			).toBe(true);
+			expect(prompt.includes("## Guidelines")).toBe(true);
+			expect(prompt.includes("Tool guidance:")).toBe(false);
 			expect(prompt.includes("not user-authored input")).toBe(true);
 			expect(
 				prompt.includes(
@@ -259,6 +319,43 @@ describe("buildPhiSystemPrompt", () => {
 					"If send already delivered everything the user should see immediately, end with exact NO_REPLY."
 				)
 			).toBe(false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("prefers explicit tool metadata over builtin fallback snippets", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				tools: [
+					{
+						name: "read",
+						promptSnippet:
+							"Inspect files through a custom read wrapper",
+						promptGuidelines: [
+							"Use the custom read wrapper when you need audit logs.",
+						],
+					},
+				],
+			});
+
+			expect(
+				prompt.includes(
+					"- read: Inspect files through a custom read wrapper"
+				)
+			).toBe(true);
+			expect(prompt.includes("- read: Read file contents")).toBe(false);
+			expect(
+				prompt.includes(
+					"Use the custom read wrapper when you need audit logs."
+				)
+			).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

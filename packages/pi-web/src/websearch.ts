@@ -291,7 +291,6 @@ export function createWebsearchTool(
 			"Search the web for relevant pages, summaries, and highlights",
 		promptGuidelines: [
 			"Use websearch to discover relevant pages before choosing which URL to read in full.",
-			"Use livecrawl when freshness matters, such as recent news or fast-changing pages.",
 		],
 		parameters: WebsearchSchema,
 		renderCall(args, theme) {

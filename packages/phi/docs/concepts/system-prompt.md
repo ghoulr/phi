@@ -20,10 +20,12 @@ Describes the system prompt used by phi chat sessions.
 | `workspacePath` | `chats.<id>.workspace` | current `cwd` |
 | `skills` | `resourceLoader.getSkills().skills` | `resourceLoader.getSkills().skills` |
 | `memoryFilePath` | `<workspace>/.phi/memory/MEMORY.md` | `~/.phi/pi/memory/MEMORY.md` |
-| `toolNames` | built-in file tools plus runtime tools when available | built-in file tools |
+| `tools` | active built-in file tools plus active runtime tools when available | active built-in file tools |
 
 Service chat skills come from pi `DefaultResourceLoader` with phi-managed skill roots.
 TUI chat uses pi skill loading from the global phi state.
+Custom and SDK tools contribute prompt text through pi tool metadata (`promptSnippet`, `promptGuidelines`).
+Built-in tools still use phi-local fallback snippets and guidance.
 
 ## Prompt sections
 
@@ -32,7 +34,7 @@ TUI chat uses pi skill loading from the global phi state.
 3. `## Skills` (when non-empty)
 4. `## Memory`
 5. `## Tools`
-6. Tool guidance
+6. `## Guidelines`
 7. `## Message Format`
 
 ## Workspace layout
@@ -72,6 +74,7 @@ Phi groups message-format rules into three buckets:
 
 Phi owns the system prompt as a dedicated core module.
 It monkey-patches pi's internal prompt rebuild so the phi prompt persists across turns.
+The rebuild stays dynamic for active tools, so runtime tool registration and tool toggles update the `## Tools` and `## Guidelines` sections.
 
 Memory maintenance runs as a separate transient turn.
 See `docs/concepts/transient-turn.md`.
