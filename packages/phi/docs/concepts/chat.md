@@ -11,6 +11,7 @@ A service chat owns:
 - memory
 - skills
 - inbox
+- cron config (`.phi/cron/cron.yaml`)
 - cron prompt files
 
 ## TUI chat

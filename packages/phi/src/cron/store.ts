@@ -2,12 +2,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 import { appendStructuredLogEntry } from "@phi/core/logger";
-import {
-	resolveWorkspaceCronJobDefinitions,
-	type PhiWorkspaceConfig,
-} from "@phi/core/workspace-config";
 import type { ChatWorkspaceLayout } from "@phi/core/chat-workspace";
 import { isRecord } from "@phi/core/type-guards";
+import {
+	resolveCronJobDefinitions,
+	type PhiCronConfig,
+} from "@phi/cron/config";
 import type { CronRunLogEntry, LoadedCronJob } from "@phi/cron/types";
 
 function toNonEmptyString(value: unknown, errorMessage: string): string {
@@ -15,6 +15,13 @@ function toNonEmptyString(value: unknown, errorMessage: string): string {
 		throw new Error(errorMessage);
 	}
 	return value.trim();
+}
+
+function toEndpointChatId(value: unknown, errorMessage: string): string {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return String(value);
+	}
+	return toNonEmptyString(value, errorMessage);
 }
 
 function resolvePromptFilePath(
@@ -35,11 +42,11 @@ function resolvePromptFilePath(
 
 export function loadCronJobs(params: {
 	layout: ChatWorkspaceLayout;
-	workspaceConfig: PhiWorkspaceConfig;
+	cronConfig: PhiCronConfig;
 }): LoadedCronJob[] {
-	const jobs = resolveWorkspaceCronJobDefinitions(
-		params.workspaceConfig,
-		params.layout.configFilePath
+	const jobs = resolveCronJobDefinitions(
+		params.cronConfig,
+		params.layout.cronConfigFilePath
 	);
 	const loadedJobs: LoadedCronJob[] = [];
 	const seenIds = new Set<string>();
@@ -60,6 +67,14 @@ export function loadCronJobs(params: {
 		}
 		seenIds.add(id);
 
+		const sessionId = toNonEmptyString(
+			rawJob.sessionId,
+			`Invalid cron job ${id}: missing sessionId`
+		);
+		const endpointChatId = toEndpointChatId(
+			rawJob.endpointChatId,
+			`Invalid cron job ${id}: missing endpointChatId`
+		);
 		const prompt = toNonEmptyString(
 			rawJob.prompt,
 			`Invalid cron job ${id}: missing prompt`
@@ -95,6 +110,8 @@ export function loadCronJobs(params: {
 		loadedJobs.push({
 			id,
 			enabled: rawJob.enabled !== false,
+			sessionId,
+			endpointChatId,
 			prompt,
 			promptFilePath,
 			promptText,

@@ -15,14 +15,16 @@ Agents do not modify it.
 ## What it contains
 
 - `chat.*` — chat-local settings such as timezone
-- `cron.*` — cron enablement and job metadata
 - `skills.entries.<name>.env` — per-skill environment variables
+
+Cron config does not live here.
+Use `<workspace>/.phi/cron/cron.yaml` and cron tools instead.
 
 ## How agents use it
 
 1. Read the template to see available options.
 2. Edit `config.yaml` with normal file tools.
-3. Call `reload` to validate config changes and schedule them to apply after the current reply ends.
+3. Call `reload` to validate workspace config changes and schedule apply after the current reply ends.
 
 Skill file creation and edits do not need `reload`.
 New sessions discover the updated skill set automatically.

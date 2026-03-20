@@ -6,9 +6,9 @@ import {
 } from "@phi/core/session-executor";
 import {
 	collectFeishuSessionServiceConfigs,
-	resolveCronSessionServiceConfigs,
+	resolveCronChatServiceConfigs,
 	type PhiConfig,
-	type ResolvedCronSessionServiceConfig,
+	type ResolvedCronChatServiceConfig,
 	type ResolvedFeishuSessionServiceConfig,
 	type ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
@@ -57,9 +57,7 @@ export interface ServiceCommandDependencies {
 	resolveTelegramWildcardRoutes(
 		phiConfig: PhiConfig
 	): ResolvedTelegramWildcardRouteConfig[];
-	resolveCronSessions(
-		phiConfig: PhiConfig
-	): ResolvedCronSessionServiceConfig[];
+	resolveCronSessions(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[];
 	createSessionExecutor(): SessionExecutor;
 	createReloadRegistry(): ChatReloadRegistry;
 	createRoutes(): ServiceRoutes;
@@ -83,8 +81,7 @@ export interface ServiceCommandDependencies {
 		config: ResolvedFeishuEndpointConfig
 	): Promise<RunningFeishuEndpoint>;
 	startCronRuntime(
-		phiConfig: PhiConfig,
-		sessionConfigs: ResolvedCronSessionServiceConfig[],
+		chatConfigs: ResolvedCronChatServiceConfig[],
 		reloadRegistry: ChatReloadRegistry,
 		routes: ServiceRoutes
 	): Promise<RunningCronService>;
@@ -106,10 +103,8 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 	): ResolvedTelegramWildcardRouteConfig[] {
 		return resolveTelegramWildcardRouteConfigs(phiConfig);
 	},
-	resolveCronSessions(
-		phiConfig: PhiConfig
-	): ResolvedCronSessionServiceConfig[] {
-		return resolveCronSessionServiceConfigs(phiConfig);
+	resolveCronSessions(phiConfig: PhiConfig): ResolvedCronChatServiceConfig[] {
+		return resolveCronChatServiceConfigs(phiConfig);
 	},
 	createSessionExecutor(): SessionExecutor {
 		return new InMemorySessionExecutor();
@@ -137,14 +132,12 @@ const defaultServiceCommandDependencies: ServiceCommandDependencies = {
 		return startFeishuService(routes, config);
 	},
 	startCronRuntime(
-		phiConfig: PhiConfig,
-		sessionConfigs: ResolvedCronSessionServiceConfig[],
+		chatConfigs: ResolvedCronChatServiceConfig[],
 		reloadRegistry: ChatReloadRegistry,
 		routes: ServiceRoutes
 	): Promise<RunningCronService> {
 		return startCronService({
-			phiConfig,
-			sessionConfigs,
+			chatConfigs,
 			reloadRegistry,
 			routes,
 		});
@@ -326,7 +319,6 @@ export async function runServiceCommand(
 	const reloadRegistry = resolvedDependencies.createReloadRegistry();
 	const routes = resolvedDependencies.createRoutes();
 	const serviceSessions = collectServiceSessions(
-		cronSessions,
 		telegramSessions,
 		feishuSessions
 	);
@@ -386,15 +378,6 @@ export async function runServiceCommand(
 			ensureServiceSession(serviceSession);
 		}
 
-		for (const sessionConfig of cronSessions) {
-			unregisterHandlers.push(
-				routes.registerCronRoute(
-					sessionConfig.chatId,
-					sessionConfig.sessionId
-				)
-			);
-		}
-
 		for (const endpointConfig of telegramEndpointConfigs) {
 			log.info("service.telegram.starting", {
 				routeCount: Object.keys(endpointConfig.chatRoutes).length,
@@ -451,7 +434,6 @@ export async function runServiceCommand(
 		}
 
 		const cronRuntime = await resolvedDependencies.startCronRuntime(
-			phiConfig,
 			cronSessions,
 			reloadRegistry,
 			routes

@@ -54,17 +54,22 @@ export interface ResolvedTelegramEndpointConfig {
 export interface TelegramEndpointDependencies {
 	botFactory?: TelegramBotFactory;
 	resolveRouteTarget?(
-		routeId: string
+		endpointChatId: string
 	): Promise<TelegramRouteTarget | undefined>;
 }
 
-function createOutboundAuditKey(routeId: string): string {
-	return createIdempotencyKey("telegram", routeId, "outbound", randomUUID());
+function createOutboundAuditKey(endpointChatId: string): string {
+	return createIdempotencyKey(
+		"telegram",
+		endpointChatId,
+		"outbound",
+		randomUUID()
+	);
 }
 
 function appendTelegramOutboundAssistantLog(params: {
 	idempotencyKey: string;
-	routeId: string;
+	endpointChatId: string;
 	target: TelegramRouteTarget;
 	message: PhiMessage;
 }): void {
@@ -72,7 +77,7 @@ function appendTelegramOutboundAssistantLog(params: {
 		idempotencyKey: params.idempotencyKey,
 		endpoint: "telegram",
 		chatId: params.target.chatId,
-		telegramChatId: params.routeId,
+		telegramChatId: params.endpointChatId,
 		direction: "outbound",
 		source: "assistant",
 		text: resolveOutboundAuditText(params.message),
@@ -81,7 +86,7 @@ function appendTelegramOutboundAssistantLog(params: {
 
 function appendTelegramOutboundErrorLog(params: {
 	idempotencyKey: string;
-	routeId: string;
+	endpointChatId: string;
 	target: TelegramRouteTarget;
 	errorText: string;
 }): void {
@@ -89,7 +94,7 @@ function appendTelegramOutboundErrorLog(params: {
 		idempotencyKey: params.idempotencyKey,
 		endpoint: "telegram",
 		chatId: params.target.chatId,
-		telegramChatId: params.routeId,
+		telegramChatId: params.endpointChatId,
 		direction: "outbound",
 		source: "error",
 		text: params.errorText,
@@ -119,40 +124,41 @@ export async function startTelegramEndpoint(
 	}
 
 	const callbacks = {
-		shouldProcess(routeId: string): boolean {
+		shouldProcess(endpointChatId: string): boolean {
 			return (
-				routeId in config.chatRoutes ||
+				endpointChatId in config.chatRoutes ||
 				config.wildcardRoute !== undefined
 			);
 		},
 
-		resolveWorkspace(routeId: string): string {
-			const target = config.chatRoutes[routeId] ?? config.wildcardRoute;
+		resolveWorkspace(endpointChatId: string): string {
+			const target =
+				config.chatRoutes[endpointChatId] ?? config.wildcardRoute;
 			if (!target) {
-				throw new Error(`No route for chat id: ${routeId}`);
+				throw new Error(`No route for chat id: ${endpointChatId}`);
 			}
 			return resolveChatWorkspaceDirectory(target.workspace);
 		},
 
 		onSuccess(
-			routeId: string,
+			endpointChatId: string,
 			updateId: number,
 			messageId: string,
 			text?: string,
 			attachments?: EndpointAttachment[]
 		): void {
-			const target = config.chatRoutes[routeId];
+			const target = config.chatRoutes[endpointChatId];
 			if (!target) return;
 
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
 					"telegram",
-					routeId,
+					endpointChatId,
 					updateId
 				),
 				endpoint: "telegram",
 				chatId: target.chatId,
-				telegramChatId: routeId,
+				telegramChatId: endpointChatId,
 				telegramUpdateId: String(updateId),
 				telegramMessageId: messageId,
 				direction: "inbound",
@@ -161,7 +167,7 @@ export async function startTelegramEndpoint(
 			});
 
 			log.info("telegram.message.completed", {
-				routeId,
+				endpointChatId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
 				messageId,
@@ -169,17 +175,17 @@ export async function startTelegramEndpoint(
 		},
 
 		onError(
-			routeId: string,
+			endpointChatId: string,
 			updateId: number,
 			messageId: string,
 			error: unknown
 		): void {
-			const target = config.chatRoutes[routeId];
+			const target = config.chatRoutes[endpointChatId];
 			if (!target) return;
 
 			const errorText = formatUserFacingErrorMessage(error);
 			log.error("telegram.message.failed", {
-				routeId,
+				endpointChatId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
 				messageId,
@@ -189,12 +195,12 @@ export async function startTelegramEndpoint(
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
 					"telegram",
-					routeId,
+					endpointChatId,
 					updateId
 				),
 				endpoint: "telegram",
 				chatId: target.chatId,
-				telegramChatId: routeId,
+				telegramChatId: endpointChatId,
 				direction: "outbound",
 				source: "error",
 				text: errorText,
@@ -207,109 +213,103 @@ export async function startTelegramEndpoint(
 		botFactory: resolvedDependencies.botFactory,
 		callbacks,
 		onMessage: async (ctx: EndpointInboundContext) => {
-			let target = config.chatRoutes[ctx.routeId];
+			let target = config.chatRoutes[ctx.endpointChatId];
 			if (!target && resolvedDependencies.resolveRouteTarget) {
 				target = await resolvedDependencies.resolveRouteTarget(
-					ctx.routeId
+					ctx.endpointChatId
 				);
 				if (target) {
-					registerRoute(ctx.routeId, target);
+					registerRoute(ctx.endpointChatId, target);
 				}
 			}
 			if (!target) {
 				throw new Error(
-					`No session configured for telegram chat id: ${ctx.routeId}`
+					`No session configured for telegram chat id: ${ctx.endpointChatId}`
 				);
 			}
-			await routes.dispatchInteractive(ctx.instanceId, ctx.routeId, {
-				text: ctx.text,
-				attachments: ctx.attachments,
-				metadata: ctx.metadata,
-				sendTyping: ctx.sendTyping,
-			});
+			await routes.dispatchInteractive(
+				ctx.instanceId,
+				ctx.endpointChatId,
+				{
+					text: ctx.text,
+					attachments: ctx.attachments,
+					metadata: ctx.metadata,
+					sendTyping: ctx.sendTyping,
+				}
+			);
 		},
 	});
 
 	const unregisterRoutes: Array<() => void> = [];
 	const registeredInteractiveRoutes = new Set<string>();
-	const registeredOutboundSessions = new Set<string>();
+	const registeredOutboundRoutes = new Set<string>();
 	const registerRoute = (
-		routeId: string,
+		endpointChatId: string,
 		target: TelegramRouteTarget
 	): void => {
-		config.chatRoutes[routeId] = target;
-		const interactiveKey = `${provider.instanceId}\u0000${routeId}`;
+		config.chatRoutes[endpointChatId] = target;
+		const interactiveKey = `${provider.instanceId}\u0000${endpointChatId}`;
 		if (!registeredInteractiveRoutes.has(interactiveKey)) {
 			registeredInteractiveRoutes.add(interactiveKey);
 			unregisterRoutes.push(
 				routes.registerInteractiveRoute(
 					provider.instanceId,
-					routeId,
+					endpointChatId,
 					target.sessionId
 				)
 			);
 		}
-		if (registeredOutboundSessions.has(target.sessionId)) {
+		const outboundKey = `${target.sessionId}\u0000${endpointChatId}`;
+		if (registeredOutboundRoutes.has(outboundKey)) {
 			return;
 		}
-		registeredOutboundSessions.add(target.sessionId);
+		registeredOutboundRoutes.add(outboundKey);
 		unregisterRoutes.push(
-			routes.registerOutboundRoute(
-				provider.instanceId,
-				target.sessionId,
-				{
-					deliver: async (activeRouteId, message) => {
-						const activeTarget = config.chatRoutes[activeRouteId];
-						if (!activeTarget) {
-							throw new Error(
-								`No telegram target configured for route ${activeRouteId}`
-							);
-						}
-						const idempotencyKey =
-							createOutboundAuditKey(activeRouteId);
-						const fields = {
-							routeId: activeRouteId,
-							chatId: activeTarget.chatId,
-							sessionId: activeTarget.sessionId,
-							textLength: message.text?.length,
-							attachmentCount: message.attachments.length,
-						};
-						log.info("telegram.outbound.sending", fields);
-						try {
-							await provider.send(activeRouteId, {
-								text: message.text,
-								attachments: message.attachments,
-							});
-							appendTelegramOutboundAssistantLog({
-								idempotencyKey,
-								routeId: activeRouteId,
-								target: activeTarget,
-								message,
-							});
-							log.info("telegram.outbound.sent", fields);
-						} catch (error: unknown) {
-							const errorText =
-								formatUserFacingErrorMessage(error);
-							appendTelegramOutboundErrorLog({
-								idempotencyKey,
-								routeId: activeRouteId,
-								target: activeTarget,
-								errorText,
-							});
-							log.error("telegram.outbound.failed", {
-								...fields,
-								err: normalizeUnknownError(error),
-							});
-							throw error;
-						}
-					},
-				}
-			)
+			routes.registerOutboundRoute(target.sessionId, endpointChatId, {
+				deliver: async (message) => {
+					const idempotencyKey =
+						createOutboundAuditKey(endpointChatId);
+					const fields = {
+						endpointChatId,
+						chatId: target.chatId,
+						sessionId: target.sessionId,
+						textLength: message.text?.length,
+						attachmentCount: message.attachments.length,
+					};
+					log.info("telegram.outbound.sending", fields);
+					try {
+						await provider.send(endpointChatId, {
+							text: message.text,
+							attachments: message.attachments,
+						});
+						appendTelegramOutboundAssistantLog({
+							idempotencyKey,
+							endpointChatId: endpointChatId,
+							target,
+							message,
+						});
+						log.info("telegram.outbound.sent", fields);
+					} catch (error: unknown) {
+						const errorText = formatUserFacingErrorMessage(error);
+						appendTelegramOutboundErrorLog({
+							idempotencyKey,
+							endpointChatId: endpointChatId,
+							target,
+							errorText,
+						});
+						log.error("telegram.outbound.failed", {
+							...fields,
+							err: normalizeUnknownError(error),
+						});
+						throw error;
+					}
+				},
+			})
 		);
 	};
 
-	for (const [routeId, target] of Object.entries(config.chatRoutes)) {
-		registerRoute(routeId, target);
+	for (const [endpointChatId, target] of Object.entries(config.chatRoutes)) {
+		registerRoute(endpointChatId, target);
 	}
 
 	let routesUnregistered = false;

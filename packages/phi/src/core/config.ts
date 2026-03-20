@@ -84,8 +84,7 @@ export interface ResolvedFeishuSessionServiceConfig {
 	appSecret: string;
 }
 
-export interface ResolvedCronSessionServiceConfig {
-	sessionId: string;
+export interface ResolvedCronChatServiceConfig {
 	chatId: string;
 	workspace: string;
 }
@@ -338,41 +337,21 @@ export function collectFeishuSessionServiceConfigs(
 	return entries;
 }
 
-export function resolveCronSessionServiceConfigs(
+export function resolveCronChatServiceConfigs(
 	phiConfig: PhiConfig
-): ResolvedCronSessionServiceConfig[] {
+): ResolvedCronChatServiceConfig[] {
 	assertUniqueChatWorkspaces(phiConfig);
 
-	const sessions = phiConfig.sessions;
-	if (!sessions) {
-		throw new Error("Missing sessions configuration in phi config.");
+	const chats = phiConfig.chats;
+	if (!chats) {
+		throw new Error("Missing chats configuration in phi config.");
 	}
 
-	const entries: ResolvedCronSessionServiceConfig[] = [];
-	const chatOwners = new Map<string, string>();
-	for (const [sessionId, sessionConfig] of Object.entries(sessions)) {
-		if (sessionConfig.cron !== true) {
-			continue;
-		}
-		const resolvedSession = resolveSessionRuntimeConfigFromEntry({
-			phiConfig,
-			sessionId,
-			sessionConfig,
-		});
-		const existingSessionId = chatOwners.get(resolvedSession.chatId);
-		if (existingSessionId) {
-			throw new Error(
-				`Duplicate cron session for chat ${resolvedSession.chatId}: ${existingSessionId} and ${sessionId}`
-			);
-		}
-		chatOwners.set(resolvedSession.chatId, sessionId);
-		entries.push({
-			sessionId,
-			chatId: resolvedSession.chatId,
-			workspace: resolvedSession.workspace,
-		});
-	}
-	return entries;
+	return Object.entries(chats).map(([chatId, chatConfig]) => ({
+		chatId,
+		workspace: resolveChatRuntimeConfigFromEntry(chatId, chatConfig)
+			.workspace,
+	}));
 }
 
 export function resolveEnabledSessionRouteKeys(

@@ -9,12 +9,14 @@ It targets a session inside a chat.
 - cron is not a message endpoint
 - cron runs inside chat workspace scope
 - cron triggers one target session
+- cron delivery binds to one explicit endpoint chat per job
 
 ## Relation
 
 Cron bindings live in routes.
 The scheduler only fires the configured binding.
-The target session and outbound delivery are resolved through routes.
+The target session comes from the job config.
+Outbound delivery uses the job's stored `endpointChatId`.
 
 ## Storage
 
@@ -22,16 +24,26 @@ The target session and outbound delivery are resolved through routes.
 <workspace>/.phi/
 ├─ config.yaml
 └─ cron/
+   ├─ cron.yaml
    └─ jobs/
       ├─ daily-summary.md
       └─ weekly-review.md
 ```
 
+`cron.yaml` stores job metadata.
+Each job stores:
+- id
+- enabled flag
+- session id
+- endpoint chat id
+- prompt file path
+- one schedule (`cron` or `at`)
+
 ## Flow
 
-1. load cron config from `.phi/config.yaml`
-2. load the prompt file
-3. resolve the target session through routes
-4. run the session turn
-5. deliver through the session's bound outbound route
+1. load workspace timezone from `.phi/config.yaml`
+2. load cron jobs from `.phi/cron/cron.yaml`
+3. load the prompt file
+4. dispatch the cron trigger to the configured session
+5. deliver through the job's stored `endpointChatId`
 6. recompute next run

@@ -11,7 +11,7 @@ import {
 	loadPhiConfig,
 	resolveAgentRuntimeConfig,
 	resolveChatRuntimeConfig,
-	resolveCronSessionServiceConfigs,
+	resolveCronChatServiceConfigs,
 	resolveSessionRuntimeConfig,
 } from "@phi/core/config";
 
@@ -141,62 +141,24 @@ describe("phi config", () => {
 		]);
 	});
 
-	it("collects cron sessions", () => {
+	it("collects cron chats", () => {
 		expect(
-			resolveCronSessionServiceConfigs({
+			resolveCronChatServiceConfigs({
 				chats: {
 					alice: { workspace: "~/phi/workspaces/alice" },
 					bob: { workspace: "~/phi/workspaces/bob" },
 				},
-				sessions: {
-					"alice-main": {
-						chat: "alice",
-						agent: "main",
-						cron: true,
-					},
-					"bob-main": {
-						chat: "bob",
-						agent: "support",
-						cron: true,
-					},
-				},
 			})
 		).toEqual([
 			{
-				sessionId: "alice-main",
 				chatId: "alice",
 				workspace: "~/phi/workspaces/alice",
 			},
 			{
-				sessionId: "bob-main",
 				chatId: "bob",
 				workspace: "~/phi/workspaces/bob",
 			},
 		]);
-	});
-
-	it("fails when two cron sessions point to the same chat", () => {
-		expect(() =>
-			resolveCronSessionServiceConfigs({
-				chats: {
-					alice: { workspace: "~/phi/workspaces/alice" },
-				},
-				sessions: {
-					"alice-main": {
-						chat: "alice",
-						agent: "main",
-						cron: true,
-					},
-					"alice-support": {
-						chat: "alice",
-						agent: "support",
-						cron: true,
-					},
-				},
-			})
-		).toThrow(
-			"Duplicate cron session for chat alice: alice-main and alice-support"
-		);
 	});
 
 	it("fails when sessions mapping is missing", () => {

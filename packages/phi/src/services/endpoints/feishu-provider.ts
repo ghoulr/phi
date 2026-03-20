@@ -171,17 +171,17 @@ interface ParsedFeishuMessageContent {
 }
 
 interface FeishuInboundCallbacks {
-	shouldProcess(routeId: string): boolean;
-	resolveWorkspace(routeId: string): string;
+	shouldProcess(endpointChatId: string): boolean;
+	resolveWorkspace(endpointChatId: string): string;
 	onSuccess(
-		routeId: string,
+		endpointChatId: string,
 		eventId: string,
 		messageId: string,
 		text?: string,
 		attachments?: EndpointAttachment[]
 	): void;
 	onError(
-		routeId: string,
+		endpointChatId: string,
 		eventId: string,
 		messageId: string,
 		error: unknown
@@ -551,7 +551,7 @@ export class FeishuProvider implements EndpointProvider {
 					await this.handleEvent(event);
 				} catch (error: unknown) {
 					log.error("feishu.message.error", {
-						routeId: event.message.chat_id,
+						endpointChatId: event.message.chat_id,
 						err: normalizeUnknownError(error),
 					});
 					await this.replyWithError(event.message.message_id, error);
@@ -777,17 +777,17 @@ export class FeishuProvider implements EndpointProvider {
 	}
 
 	private async handleEvent(event: FeishuMessageEvent): Promise<void> {
-		const routeId = event.message.chat_id;
-		if (!this.callbacks.shouldProcess(routeId)) {
-			log.debug("feishu.message.no_route", { routeId });
+		const endpointChatId = event.message.chat_id;
+		if (!this.callbacks.shouldProcess(endpointChatId)) {
+			log.debug("feishu.message.no_route", { endpointChatId });
 			return;
 		}
 
 		const eventId = event.event_id ?? event.message.message_id;
-		const dedupKey = createIdempotencyKey(this.id, routeId, eventId);
+		const dedupKey = createIdempotencyKey(this.id, endpointChatId, eventId);
 		if (this.dedup.has(dedupKey)) {
 			log.debug("feishu.message.duplicate_skipped", {
-				routeId,
+				endpointChatId,
 				eventId,
 			});
 			return;
@@ -797,7 +797,7 @@ export class FeishuProvider implements EndpointProvider {
 		const parsedContent = parseMessageContent(event);
 		const downloadedAttachments: EndpointAttachment[] = [];
 		if (parsedContent.attachment) {
-			const workspace = this.callbacks.resolveWorkspace(routeId);
+			const workspace = this.callbacks.resolveWorkspace(endpointChatId);
 			const downloaded = await this.downloadAttachment(
 				event.message.message_id,
 				parsedContent.attachment.resourceType,
@@ -827,7 +827,7 @@ export class FeishuProvider implements EndpointProvider {
 		const inboundCtx: EndpointInboundContext = {
 			endpointId: this.id,
 			instanceId: this.instanceId,
-			routeId,
+			endpointChatId,
 			messageId,
 			text: parsedContent.text,
 			attachments: downloadedAttachments,
@@ -841,7 +841,7 @@ export class FeishuProvider implements EndpointProvider {
 		try {
 			await this.messageHandler(inboundCtx);
 			this.callbacks.onSuccess(
-				routeId,
+				endpointChatId,
 				eventId,
 				messageId,
 				parsedContent.text,
@@ -849,7 +849,7 @@ export class FeishuProvider implements EndpointProvider {
 			);
 		} catch (error: unknown) {
 			this.dedup.delete(dedupKey);
-			this.callbacks.onError(routeId, eventId, messageId, error);
+			this.callbacks.onError(endpointChatId, eventId, messageId, error);
 			throw error;
 		}
 	}

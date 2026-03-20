@@ -55,13 +55,18 @@ export interface FeishuEndpointDependencies {
 	wsClientFactory?: FeishuWsClientFactory;
 }
 
-function createOutboundAuditKey(routeId: string): string {
-	return createIdempotencyKey("feishu", routeId, "outbound", randomUUID());
+function createOutboundAuditKey(endpointChatId: string): string {
+	return createIdempotencyKey(
+		"feishu",
+		endpointChatId,
+		"outbound",
+		randomUUID()
+	);
 }
 
 function appendFeishuOutboundAssistantLog(params: {
 	idempotencyKey: string;
-	routeId: string;
+	endpointChatId: string;
 	target: FeishuRouteTarget;
 	message: PhiMessage;
 }): void {
@@ -69,7 +74,7 @@ function appendFeishuOutboundAssistantLog(params: {
 		idempotencyKey: params.idempotencyKey,
 		endpoint: "feishu",
 		chatId: params.target.chatId,
-		feishuChatId: params.routeId,
+		feishuChatId: params.endpointChatId,
 		direction: "outbound",
 		source: "assistant",
 		text: resolveOutboundAuditText(params.message),
@@ -78,7 +83,7 @@ function appendFeishuOutboundAssistantLog(params: {
 
 function appendFeishuOutboundErrorLog(params: {
 	idempotencyKey: string;
-	routeId: string;
+	endpointChatId: string;
 	target: FeishuRouteTarget;
 	errorText: string;
 }): void {
@@ -86,7 +91,7 @@ function appendFeishuOutboundErrorLog(params: {
 		idempotencyKey: params.idempotencyKey,
 		endpoint: "feishu",
 		chatId: params.target.chatId,
-		feishuChatId: params.routeId,
+		feishuChatId: params.endpointChatId,
 		direction: "outbound",
 		source: "error",
 		text: params.errorText,
@@ -111,38 +116,38 @@ export async function startFeishuEndpoint(
 	}
 
 	const callbacks = {
-		shouldProcess(routeId: string): boolean {
-			return routeId in config.chatRoutes;
+		shouldProcess(endpointChatId: string): boolean {
+			return endpointChatId in config.chatRoutes;
 		},
 
-		resolveWorkspace(routeId: string): string {
-			const target = config.chatRoutes[routeId];
+		resolveWorkspace(endpointChatId: string): string {
+			const target = config.chatRoutes[endpointChatId];
 			if (!target) {
-				throw new Error(`No route for chat id: ${routeId}`);
+				throw new Error(`No route for chat id: ${endpointChatId}`);
 			}
 			return resolveChatWorkspaceDirectory(target.workspace);
 		},
 
 		onSuccess(
-			routeId: string,
+			endpointChatId: string,
 			eventId: string,
 			messageId: string,
 			text?: string,
 			attachments?: EndpointAttachment[]
 		): void {
-			const target = config.chatRoutes[routeId];
+			const target = config.chatRoutes[endpointChatId];
 			if (!target) {
 				return;
 			}
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
 					"feishu",
-					routeId,
+					endpointChatId,
 					eventId
 				),
 				endpoint: "feishu",
 				chatId: target.chatId,
-				feishuChatId: routeId,
+				feishuChatId: endpointChatId,
 				feishuEventId: eventId,
 				feishuMessageId: messageId,
 				direction: "inbound",
@@ -150,7 +155,7 @@ export async function startFeishuEndpoint(
 				text: text ?? `[${attachments?.length ?? 0} attachment(s)]`,
 			});
 			log.info("feishu.message.completed", {
-				routeId,
+				endpointChatId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
 				messageId,
@@ -158,18 +163,18 @@ export async function startFeishuEndpoint(
 		},
 
 		onError(
-			routeId: string,
+			endpointChatId: string,
 			eventId: string,
 			messageId: string,
 			error: unknown
 		): void {
-			const target = config.chatRoutes[routeId];
+			const target = config.chatRoutes[endpointChatId];
 			if (!target) {
 				return;
 			}
 			const errorText = formatUserFacingErrorMessage(error);
 			log.error("feishu.message.failed", {
-				routeId,
+				endpointChatId,
 				chatId: target.chatId,
 				sessionId: target.sessionId,
 				messageId,
@@ -178,12 +183,12 @@ export async function startFeishuEndpoint(
 			appendChatLogEntry({
 				idempotencyKey: createIdempotencyKey(
 					"feishu",
-					routeId,
+					endpointChatId,
 					eventId
 				),
 				endpoint: "feishu",
 				chatId: target.chatId,
-				feishuChatId: routeId,
+				feishuChatId: endpointChatId,
 				feishuEventId: eventId,
 				feishuMessageId: messageId,
 				direction: "outbound",
@@ -194,13 +199,13 @@ export async function startFeishuEndpoint(
 	};
 
 	const onMessage = async (ctx: EndpointInboundContext) => {
-		const target = config.chatRoutes[ctx.routeId];
+		const target = config.chatRoutes[ctx.endpointChatId];
 		if (!target) {
 			throw new Error(
-				`No session configured for feishu chat id: ${ctx.routeId}`
+				`No session configured for feishu chat id: ${ctx.endpointChatId}`
 			);
 		}
-		await routes.dispatchInteractive(ctx.instanceId, ctx.routeId, {
+		await routes.dispatchInteractive(ctx.instanceId, ctx.endpointChatId, {
 			text: ctx.text,
 			attachments: ctx.attachments,
 			metadata: ctx.metadata,
@@ -219,71 +224,61 @@ export async function startFeishuEndpoint(
 	});
 
 	const unregisterRoutes: Array<() => void> = [];
-	const registeredOutboundSessions = new Set<string>();
-	for (const [routeId, target] of Object.entries(config.chatRoutes)) {
+	const registeredOutboundRoutes = new Set<string>();
+	for (const [endpointChatId, target] of Object.entries(config.chatRoutes)) {
 		unregisterRoutes.push(
 			routes.registerInteractiveRoute(
 				provider.instanceId,
-				routeId,
+				endpointChatId,
 				target.sessionId
 			)
 		);
-		if (registeredOutboundSessions.has(target.sessionId)) {
+		const outboundKey = `${target.sessionId}\u0000${endpointChatId}`;
+		if (registeredOutboundRoutes.has(outboundKey)) {
 			continue;
 		}
-		registeredOutboundSessions.add(target.sessionId);
+		registeredOutboundRoutes.add(outboundKey);
 		unregisterRoutes.push(
-			routes.registerOutboundRoute(
-				provider.instanceId,
-				target.sessionId,
-				{
-					deliver: async (activeRouteId, message) => {
-						const activeTarget = config.chatRoutes[activeRouteId];
-						if (!activeTarget) {
-							throw new Error(
-								`No feishu target configured for route ${activeRouteId}`
-							);
-						}
-						const idempotencyKey =
-							createOutboundAuditKey(activeRouteId);
-						const fields = {
-							routeId: activeRouteId,
-							chatId: activeTarget.chatId,
-							sessionId: activeTarget.sessionId,
-							textLength: message.text?.length,
-							attachmentCount: message.attachments.length,
-						};
-						log.info("feishu.outbound.sending", fields);
-						try {
-							await provider.send(activeRouteId, {
-								text: message.text,
-								attachments: message.attachments,
-							});
-							appendFeishuOutboundAssistantLog({
-								idempotencyKey,
-								routeId: activeRouteId,
-								target: activeTarget,
-								message,
-							});
-							log.info("feishu.outbound.sent", fields);
-						} catch (error: unknown) {
-							const errorText =
-								formatUserFacingErrorMessage(error);
-							appendFeishuOutboundErrorLog({
-								idempotencyKey,
-								routeId: activeRouteId,
-								target: activeTarget,
-								errorText,
-							});
-							log.error("feishu.outbound.failed", {
-								...fields,
-								err: normalizeUnknownError(error),
-							});
-							throw error;
-						}
-					},
-				}
-			)
+			routes.registerOutboundRoute(target.sessionId, endpointChatId, {
+				deliver: async (message) => {
+					const idempotencyKey =
+						createOutboundAuditKey(endpointChatId);
+					const fields = {
+						endpointChatId,
+						chatId: target.chatId,
+						sessionId: target.sessionId,
+						textLength: message.text?.length,
+						attachmentCount: message.attachments.length,
+					};
+					log.info("feishu.outbound.sending", fields);
+					try {
+						await provider.send(endpointChatId, {
+							text: message.text,
+							attachments: message.attachments,
+						});
+						appendFeishuOutboundAssistantLog({
+							idempotencyKey,
+							endpointChatId: endpointChatId,
+							target,
+							message,
+						});
+						log.info("feishu.outbound.sent", fields);
+					} catch (error: unknown) {
+						const errorText = formatUserFacingErrorMessage(error);
+						appendFeishuOutboundErrorLog({
+							idempotencyKey,
+							endpointChatId: endpointChatId,
+							target,
+							errorText,
+						});
+						log.error("feishu.outbound.failed", {
+							...fields,
+							err: normalizeUnknownError(error),
+						});
+						throw error;
+					}
+				},
+			})
 		);
 	}
 

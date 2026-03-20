@@ -13,8 +13,8 @@ Outbound delivery  ◄─┘
 
 Routes map:
 - inbound source to session
-- inbound cron trigger to session
 - session to outbound delivery
+- session to endpoint chat binding
 
 Routes do not own session history.
 Routes do not interpret message meaning.
@@ -27,7 +27,19 @@ Runtime Telegram bindings live in `~/.phi/routes/telegram.yaml`.
 Current cutover:
 - Telegram routes use `allowList`
 - Feishu routes still use one fixed `id`
-- `cron` stays static
+
+## Runtime keys
+
+Persistent ids:
+- `sessionId`
+- `endpointChatId`
+
+Runtime-only ids:
+- `endpointId`
+
+`endpointChatId` is the endpoint-scoped peer id used for reply delivery.
+For Telegram it is `String(chat.id)`.
+For Feishu it is the chat id.
 
 ## Telegram
 
@@ -39,7 +51,7 @@ Current rules:
 - `*` is reserved for a later runtime-binding step
 
 On startup, phi restores or creates a runtime `chatId -> sessionId` binding for each allowed Telegram chat.
-Replies use the active inbound route for that session.
+Replies use the active inbound `endpointChatId` for that session.
 
 ## Current model
 

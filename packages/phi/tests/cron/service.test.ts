@@ -125,16 +125,18 @@ describe("startCronService", () => {
 		);
 		writeFileSync(
 			layout.configFilePath,
+			["version: 1", "chat:", `  timezone: ${timezone}`].join("\n"),
+			"utf-8"
+		);
+		writeFileSync(
+			layout.cronConfigFilePath,
 			[
-				"version: 1",
-				"chat:",
-				`  timezone: ${timezone}`,
-				"cron:",
-				"  enabled: true",
-				"  jobs:",
-				"    - id: daily",
-				"      prompt: jobs/daily.md",
-				`      at: "${at}"`,
+				"jobs:",
+				"  - id: daily",
+				"    sessionId: alice-cron",
+				"    endpointChatId: 42",
+				"    prompt: jobs/daily.md",
+				`    at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);
@@ -144,31 +146,14 @@ describe("startCronService", () => {
 			"alice-cron",
 			createSession({
 				async submitCron(input): Promise<PhiMessage[]> {
-					prompts.push(input.text);
+					prompts.push(`${input.text}|${input.endpointChatId}`);
 					return [{ text: "done", attachments: [] }];
 				},
 			})
 		);
-		routes.registerCronRoute("alice", "alice-cron");
 
 		const service = await startCronService({
-			phiConfig: {
-				chats: {
-					alice: {
-						workspace,
-					},
-				},
-				sessions: {
-					"alice-cron": {
-						chat: "alice",
-						agent: "main",
-						cron: true,
-					},
-				},
-			},
-			sessionConfigs: [
-				{ sessionId: "alice-cron", chatId: "alice", workspace },
-			],
+			chatConfigs: [{ chatId: "alice", workspace }],
 			reloadRegistry: new ChatReloadRegistry(),
 			routes,
 		});
@@ -176,7 +161,7 @@ describe("startCronService", () => {
 		await advanceClockAndFlush(2600);
 		await service.stop();
 
-		expect(prompts).toEqual(["Summarize status."]);
+		expect(prompts).toEqual(["Summarize status.|42"]);
 		expect(readCapturedLogs()).toContain('"event":"cron.run"');
 		expect(readCapturedLogs()).toContain('"status":"ok"');
 	});
@@ -194,16 +179,18 @@ describe("startCronService", () => {
 		);
 		writeFileSync(
 			layout.configFilePath,
+			["version: 1", "chat:", `  timezone: ${timezone}`].join("\n"),
+			"utf-8"
+		);
+		writeFileSync(
+			layout.cronConfigFilePath,
 			[
-				"version: 1",
-				"chat:",
-				`  timezone: ${timezone}`,
-				"cron:",
-				"  enabled: true",
-				"  jobs:",
-				"    - id: daily",
-				"      prompt: jobs/daily.md",
-				`      at: "${at}"`,
+				"jobs:",
+				"  - id: daily",
+				"    sessionId: alice-cron",
+				"    endpointChatId: 42",
+				"    prompt: jobs/daily.md",
+				`    at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);
@@ -218,43 +205,23 @@ describe("startCronService", () => {
 				},
 			})
 		);
-		routes.registerCronRoute("alice", "alice-cron");
 		const reloadRegistry = new ChatReloadRegistry();
 
 		const service = await startCronService({
-			phiConfig: {
-				chats: {
-					alice: {
-						workspace,
-					},
-				},
-				sessions: {
-					"alice-cron": {
-						chat: "alice",
-						agent: "main",
-						cron: true,
-					},
-				},
-			},
-			sessionConfigs: [
-				{ sessionId: "alice-cron", chatId: "alice", workspace },
-			],
+			chatConfigs: [{ chatId: "alice", workspace }],
 			reloadRegistry,
 			routes,
 		});
 
 		writeFileSync(
-			layout.configFilePath,
+			layout.cronConfigFilePath,
 			[
-				"version: 1",
-				"chat:",
-				`  timezone: ${timezone}`,
-				"cron:",
-				"  enabled: true",
-				"  jobs:",
-				"    - id: broken",
-				"      prompt: jobs/missing.md",
-				`      at: "${at}"`,
+				"jobs:",
+				"  - id: broken",
+				"    sessionId: alice-cron",
+				"    endpointChatId: 42",
+				"    prompt: jobs/missing.md",
+				`    at: "${at}"`,
 			].join("\n"),
 			"utf-8"
 		);

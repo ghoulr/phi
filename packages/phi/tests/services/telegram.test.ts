@@ -17,7 +17,7 @@ import type {
 } from "@phi/services/endpoints";
 
 interface FakeTelegramUpdate {
-	routeId: string;
+	endpointChatId: string;
 	messageId: number;
 	text?: string;
 }
@@ -63,9 +63,9 @@ class FakeTelegramBot implements TelegramBotLike {
 				message: {
 					message_id: update.messageId,
 					text: update.text,
-					chat: { id: Number(update.routeId) },
+					chat: { id: Number(update.endpointChatId) },
 				},
-				chat: { id: Number(update.routeId) },
+				chat: { id: Number(update.endpointChatId) },
 				update: { update_id: update.messageId + 1000 },
 				api: this.api,
 			});
@@ -131,7 +131,7 @@ afterEach(() => {
 describe("startTelegramEndpoint", () => {
 	it("routes telegram messages to the configured session", async () => {
 		const bot = new FakeTelegramBot([
-			{ routeId: "42", messageId: 1, text: "hello" },
+			{ endpointChatId: "42", messageId: 1, text: "hello" },
 		]);
 		const routes = new ServiceRoutes();
 		const submissions: InteractiveInput[] = [];
@@ -192,7 +192,7 @@ describe("startTelegramEndpoint", () => {
 
 	it("routes replies through the active telegram allowList route", async () => {
 		const bot = new FakeTelegramBot([
-			{ routeId: "43", messageId: 1, text: "hello" },
+			{ endpointChatId: "43", messageId: 1, text: "hello" },
 		]);
 		const routes = new ServiceRoutes();
 		routes.registerSession(

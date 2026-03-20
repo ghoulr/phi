@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "bun:test";
 
 import { ensureChatWorkspaceLayout } from "@phi/core/chat-workspace";
-import { loadPhiWorkspaceConfig } from "@phi/core/workspace-config";
+import { loadPhiCronConfig } from "@phi/cron/config";
 import { loadCronJobs } from "@phi/cron/store";
 
 describe("loadCronJobs", () => {
@@ -20,28 +20,25 @@ describe("loadCronJobs", () => {
 				"utf-8"
 			);
 			writeFileSync(
-				layout.configFilePath,
+				layout.cronConfigFilePath,
 				[
-					"version: 1",
-					"chat:",
-					"  timezone: Asia/Shanghai",
-					"cron:",
-					"  enabled: true",
-					"  jobs:",
-					"    - id: daily",
-					"      prompt: jobs/daily.md",
-					'      cron: "0 9 * * *"',
+					"jobs:",
+					"  - id: daily",
+					"    sessionId: alice-main",
+					"    endpointChatId: 42",
+					"    prompt: jobs/daily.md",
+					'    cron: "0 9 * * *"',
 				].join("\n"),
 				"utf-8"
 			);
-			const workspaceConfig = loadPhiWorkspaceConfig(
-				layout.configFilePath
-			);
+			const cronConfig = loadPhiCronConfig(layout.cronConfigFilePath);
 
-			expect(loadCronJobs({ layout, workspaceConfig })).toEqual([
+			expect(loadCronJobs({ layout, cronConfig })).toEqual([
 				{
 					id: "daily",
 					enabled: true,
+					sessionId: "alice-main",
+					endpointChatId: "42",
 					prompt: "jobs/daily.md",
 					promptFilePath: join(layout.cronJobsDir, "daily.md"),
 					promptText: "# Daily\nDo work.",
@@ -65,24 +62,21 @@ describe("loadCronJobs", () => {
 				"utf-8"
 			);
 			writeFileSync(
-				layout.configFilePath,
+				layout.cronConfigFilePath,
 				[
-					"version: 1",
-					"cron:",
-					"  enabled: true",
-					"  jobs:",
-					"    - id: daily",
-					"      prompt: jobs/daily.md",
-					'      cron: "0 9 * * *"',
-					'      at: "2026-03-08 09:00"',
+					"jobs:",
+					"  - id: daily",
+					"    sessionId: alice-main",
+					"    endpointChatId: 42",
+					"    prompt: jobs/daily.md",
+					'    cron: "0 9 * * *"',
+					'    at: "2026-03-08 09:00"',
 				].join("\n"),
 				"utf-8"
 			);
-			const workspaceConfig = loadPhiWorkspaceConfig(
-				layout.configFilePath
-			);
+			const cronConfig = loadPhiCronConfig(layout.cronConfigFilePath);
 
-			expect(() => loadCronJobs({ layout, workspaceConfig })).toThrow(
+			expect(() => loadCronJobs({ layout, cronConfig })).toThrow(
 				"exactly one of cron or at must be set"
 			);
 		} finally {
@@ -90,30 +84,31 @@ describe("loadCronJobs", () => {
 		}
 	});
 
-	it("fails when prompt path escapes cron directory", () => {
+	it("fails when endpointChatId is missing", () => {
 		const root = mkdtempSync(join(tmpdir(), "phi-cron-store-"));
 
 		try {
 			const layout = ensureChatWorkspaceLayout(root);
 			writeFileSync(
-				layout.configFilePath,
+				join(layout.cronJobsDir, "daily.md"),
+				"# Daily\nDo work.\n",
+				"utf-8"
+			);
+			writeFileSync(
+				layout.cronConfigFilePath,
 				[
-					"version: 1",
-					"cron:",
-					"  enabled: true",
-					"  jobs:",
-					"    - id: daily",
-					"      prompt: ../outside.md",
-					'      cron: "0 9 * * *"',
+					"jobs:",
+					"  - id: daily",
+					"    sessionId: alice-main",
+					"    prompt: jobs/daily.md",
+					'    cron: "0 9 * * *"',
 				].join("\n"),
 				"utf-8"
 			);
-			const workspaceConfig = loadPhiWorkspaceConfig(
-				layout.configFilePath
-			);
+			const cronConfig = loadPhiCronConfig(layout.cronConfigFilePath);
 
-			expect(() => loadCronJobs({ layout, workspaceConfig })).toThrow(
-				"Invalid prompt path for cron job daily"
+			expect(() => loadCronJobs({ layout, cronConfig })).toThrow(
+				"Invalid cron job daily: missing endpointChatId"
 			);
 		} finally {
 			rmSync(root, { recursive: true, force: true });

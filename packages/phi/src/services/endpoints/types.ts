@@ -9,7 +9,7 @@ export interface EndpointAttachment {
 export interface EndpointInboundContext {
 	endpointId: string;
 	instanceId: string;
-	routeId: string;
+	endpointChatId: string;
 	messageId: string;
 	text?: string;
 	attachments: EndpointAttachment[];
@@ -30,5 +30,8 @@ export interface EndpointProvider {
 
 	start(): Promise<void>;
 	stop(): Promise<void>;
-	send(chatId: string, message: EndpointOutboundMessage): Promise<void>;
+	send(
+		endpointChatId: string,
+		message: EndpointOutboundMessage
+	): Promise<void>;
 }

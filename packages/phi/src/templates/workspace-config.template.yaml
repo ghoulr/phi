@@ -10,30 +10,6 @@ chat:
   # Used by cron `at` and cron expression evaluation.
   timezone: Asia/Shanghai
 
-cron:
-  # Turn cron on or off for this workspace.
-  enabled: true
-
-  # Cron job metadata lives here.
-  # Prompt files live under <workspace>/.phi/cron/jobs/.
-  # Each prompt file should describe what to do when the job fires, NOT what user asks.
-  jobs:
-    # Example recurring job.
-    # jobs/daily-summary.md should contain the work to do at 09:00,
-    # for example: "Send the user a short weekday summary now."
-    - id: daily-summary
-      enabled: true
-      prompt: jobs/daily-summary.md
-      cron: "0 9 * * 1-5"
-
-    # Example one-shot job.
-    # jobs/dentist-reminder.md should contain the reminder to deliver at that time,
-    # for example: "Remind the user about the dentist appointment now."
-    - id: dentist-reminder
-      enabled: true
-      prompt: jobs/dentist-reminder.md
-      at: "2030-01-15 09:00"
-
 skills:
   entries:
     example-skill:

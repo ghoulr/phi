@@ -42,6 +42,7 @@ A service chat owns:
 - memory
 - skills
 - inbox
+- cron config
 - cron prompt files
 
 ## Session
@@ -65,8 +66,9 @@ Routes map:
 - inbound cron trigger to session
 - session to outbound delivery
 
-Default reply flow is route-local.
-A message normally replies through the same route that entered the session.
+Default reply flow is endpoint-chat-local.
+A message normally replies through the same `endpointChatId` that entered the session.
+Cron stores one explicit `endpointChatId` per job.
 
 ## Storage
 
@@ -88,6 +90,7 @@ A message normally replies through the same route that entered the session.
    ├─ memory/
    ├─ inbox/
    └─ cron/
+      ├─ cron.yaml
       └─ jobs/
 ```
 

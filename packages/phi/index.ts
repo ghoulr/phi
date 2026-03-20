@@ -10,6 +10,10 @@ import { disablePiVersionCheck } from "@phi/core/pi";
 import { ChatReloadRegistry } from "@phi/core/reload";
 import { createReloadTool } from "@phi/core/reload-tool";
 import { createPhiAgentSession, createPhiRuntime } from "@phi/core/runtime";
+import { createCronTools } from "@phi/cron/tools";
+import { CronControllerRegistry } from "@phi/cron/controller";
+import { startCronService } from "@phi/cron/service";
+import { resolveChatWorkspaceDirectory } from "@phi/core/chat-workspace";
 import { createServiceSessionExtensionFactories } from "@phi/services/session";
 import { ServiceRoutes } from "@phi/services/routes";
 import { tui } from "@phi/tui";
@@ -29,6 +33,7 @@ if (shouldRunPiCommandDirectly(cliArgs)) {
 			const phiConfig = loadPhiConfig(getDefaultPhiConfigFilePath());
 			const reloadRegistry = new ChatReloadRegistry();
 			const routes = new ServiceRoutes();
+			const cronControllerRegistry = new CronControllerRegistry();
 			const runtime = createPhiRuntime(
 				phiConfig,
 				{},
@@ -40,6 +45,17 @@ if (shouldRunPiCommandDirectly(cliArgs)) {
 					const customTools = [
 						createReloadTool(sessionConfig.chatId, reloadRegistry),
 					];
+					customTools.push(
+						...createCronTools({
+							chatId: sessionConfig.chatId,
+							sessionId,
+							workspaceDir: resolveChatWorkspaceDirectory(
+								sessionConfig.workspace
+							),
+							routes,
+							controllerRegistry: cronControllerRegistry,
+						})
+					);
 					return await createPhiAgentSession(sessionId, phiConfig, {
 						customTools,
 						printSystemPrompt: options.printSystemPrompt === true,
@@ -62,6 +78,18 @@ if (shouldRunPiCommandDirectly(cliArgs)) {
 				},
 				createRoutes(): ServiceRoutes {
 					return routes;
+				},
+				async startCronRuntime(
+					chatConfigs,
+					startReloadRegistry,
+					startRoutes
+				) {
+					return await startCronService({
+						chatConfigs,
+						reloadRegistry: startReloadRegistry,
+						routes: startRoutes,
+						controllerRegistry: cronControllerRegistry,
+					});
 				},
 			});
 		},

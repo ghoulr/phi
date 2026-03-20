@@ -82,17 +82,17 @@ export interface TelegramBotLike {
 export type TelegramBotFactory = (token: string) => TelegramBotLike;
 
 interface TelegramInboundCallbacks {
-	shouldProcess(routeId: string): boolean;
-	resolveWorkspace(routeId: string): string;
+	shouldProcess(endpointChatId: string): boolean;
+	resolveWorkspace(endpointChatId: string): string;
 	onSuccess(
-		routeId: string,
+		endpointChatId: string,
 		updateId: number,
 		messageId: string,
 		text?: string,
 		attachments?: EndpointAttachment[]
 	): void;
 	onError(
-		routeId: string,
+		endpointChatId: string,
 		updateId: number,
 		messageId: string,
 		error: unknown
@@ -302,7 +302,7 @@ export class TelegramProvider implements EndpointProvider {
 				if (message && chat && bot) {
 					const errorText = formatUserFacingErrorMessage(error);
 					log.error("telegram.message.error", {
-						routeId: String(chat.id),
+						endpointChatId: String(chat.id),
 						err: normalizeUnknownError(error),
 					});
 					try {
@@ -438,17 +438,21 @@ export class TelegramProvider implements EndpointProvider {
 			throw new Error("Telegram update is missing chat information.");
 		}
 
-		const routeId = String(chat.id);
-		if (!this.callbacks.shouldProcess(routeId)) {
-			log.debug("telegram.message.no_route", { routeId });
+		const endpointChatId = String(chat.id);
+		if (!this.callbacks.shouldProcess(endpointChatId)) {
+			log.debug("telegram.message.no_route", { endpointChatId });
 			return;
 		}
 
 		const updateId = context.update.update_id;
-		const dedupKey = createIdempotencyKey(this.id, routeId, updateId);
+		const dedupKey = createIdempotencyKey(
+			this.id,
+			endpointChatId,
+			updateId
+		);
 		if (this.dedup.has(dedupKey)) {
 			log.debug("telegram.message.duplicate_skipped", {
-				routeId,
+				endpointChatId,
 				updateId,
 			});
 			return;
@@ -487,7 +491,7 @@ export class TelegramProvider implements EndpointProvider {
 		}
 
 		const metadata = buildTelegramMessageMetadata(message as Message);
-		const workspace = this.callbacks.resolveWorkspace(routeId);
+		const workspace = this.callbacks.resolveWorkspace(endpointChatId);
 		const downloadedAttachments: EndpointAttachment[] = [];
 		for (const [index, attachment] of rawAttachments.entries()) {
 			const downloaded = await this.downloadFile(bot, attachment.fileId);
@@ -506,7 +510,7 @@ export class TelegramProvider implements EndpointProvider {
 		const inboundCtx: EndpointInboundContext = {
 			endpointId: this.id,
 			instanceId: this.instanceId,
-			routeId,
+			endpointChatId,
 			messageId,
 			text,
 			attachments: downloadedAttachments,
@@ -522,7 +526,7 @@ export class TelegramProvider implements EndpointProvider {
 		try {
 			await this.messageHandler(inboundCtx);
 			this.callbacks.onSuccess(
-				routeId,
+				endpointChatId,
 				updateId,
 				messageId,
 				text,
@@ -530,7 +534,7 @@ export class TelegramProvider implements EndpointProvider {
 			);
 		} catch (error: unknown) {
 			this.dedup.delete(dedupKey);
-			this.callbacks.onError(routeId, updateId, messageId, error);
+			this.callbacks.onError(endpointChatId, updateId, messageId, error);
 			throw error;
 		}
 	}

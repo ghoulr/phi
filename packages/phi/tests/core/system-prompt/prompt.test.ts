@@ -155,18 +155,11 @@ describe("buildPhiSystemPrompt", () => {
 				)
 			).toBe(true);
 			expect(prompt.includes("- timezone")).toBe(true);
-			expect(prompt.includes("- cron")).toBe(true);
 			expect(prompt.includes("- skills env")).toBe(true);
-			expect(
-				prompt.includes(
-					"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions."
-				)
-			).toBe(true);
-			expect(
-				prompt.includes(
-					"Cron jobs live in workspace config. The target session is configured in `~/.phi/phi.yaml`."
-				)
-			).toBe(true);
+			expect(prompt.includes("- cron")).toBe(false);
+			expect(prompt.includes(".phi/cron/cron.yaml")).toBe(false);
+			expect(prompt.includes(".phi/cron/jobs/")).toBe(false);
+			expect(prompt.includes("docs/concepts")).toBe(false);
 			expect(
 				prompt.includes(
 					"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends."
@@ -200,6 +193,53 @@ describe("buildPhiSystemPrompt", () => {
 				true
 			);
 			expect(prompt.includes(".phi/config.yaml")).toBe(false);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("includes cron tool snippets and guidelines when provided", () => {
+		const { dir, filePath } = createMemoryFile("# MEMORY\n");
+
+		try {
+			const prompt = buildPhiSystemPrompt({
+				assistantName: "Phi",
+				workspacePath: "/workspace/alice",
+				skills: [],
+				memoryFilePath: filePath,
+				tools: [
+					{
+						name: "createCron",
+						promptSnippet: "Create a cron job",
+						promptGuidelines: [
+							"prompt in cron should describe what to do when the job fires, NOT what user asks",
+						],
+					},
+					{
+						name: "listCron",
+						promptSnippet: "List existing cron jobs",
+					},
+					{
+						name: "fireCron",
+						promptSnippet: "Fire a cron job now",
+					},
+				],
+			});
+
+			expect(prompt.includes("- createCron: Create a cron job")).toBe(
+				true
+			);
+			expect(prompt.includes("- listCron: List existing cron jobs")).toBe(
+				true
+			);
+			expect(prompt.includes("- fireCron: Fire a cron job now")).toBe(
+				true
+			);
+			expect(
+				prompt.includes(
+					"prompt in cron should describe what to do when the job fires, NOT what user asks"
+				)
+			).toBe(true);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

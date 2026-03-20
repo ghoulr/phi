@@ -1,6 +1,8 @@
 export interface CronJobDefinition {
 	id: string;
 	enabled?: boolean;
+	sessionId: string;
+	endpointChatId: string;
 	prompt: string;
 	cron?: string;
 	at?: string;
@@ -9,6 +11,8 @@ export interface CronJobDefinition {
 export interface LoadedCronJob {
 	id: string;
 	enabled: boolean;
+	sessionId: string;
+	endpointChatId: string;
 	prompt: string;
 	promptFilePath: string;
 	promptText: string;

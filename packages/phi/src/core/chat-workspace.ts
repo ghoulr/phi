@@ -6,6 +6,7 @@ import {
 	createDefaultPhiWorkspaceConfigFileContent,
 	renderPhiWorkspaceConfigTemplate,
 } from "@phi/core/workspace-config";
+import { createDefaultPhiCronConfigFileContent } from "@phi/cron/config";
 
 const DOT_PHI_DIR = ".phi";
 const SESSIONS_DIR = "sessions";
@@ -13,6 +14,7 @@ const MEMORY_DIR = "memory";
 const SKILLS_DIR = "skills";
 const CRON_DIR = "cron";
 const CRON_JOBS_DIR = "jobs";
+const CRON_CONFIG_FILE_NAME = "cron.yaml";
 const INBOX_DIR = "inbox";
 const CONFIG_FILE_NAME = "config.yaml";
 const CONFIG_TEMPLATE_FILE_NAME = "config.template.yaml";
@@ -30,6 +32,7 @@ export interface ChatWorkspaceLayout {
 	inboxDir: string;
 	cronDir: string;
 	cronJobsDir: string;
+	cronConfigFilePath: string;
 	memoryFilePath: string;
 }
 
@@ -67,6 +70,7 @@ export function ensureChatWorkspaceLayout(
 	const inboxDir = join(phiDir, INBOX_DIR);
 	const cronDir = join(phiDir, CRON_DIR);
 	const cronJobsDir = join(cronDir, CRON_JOBS_DIR);
+	const cronConfigFilePath = join(cronDir, CRON_CONFIG_FILE_NAME);
 	const memoryFilePath = join(memoryDir, MEMORY_FILE_NAME);
 
 	mkdirSync(sessionsDir, { recursive: true });
@@ -90,6 +94,13 @@ export function ensureChatWorkspaceLayout(
 			"utf-8"
 		);
 	}
+	if (!existsSync(cronConfigFilePath)) {
+		writeFileSync(
+			cronConfigFilePath,
+			createDefaultPhiCronConfigFileContent(),
+			"utf-8"
+		);
+	}
 	if (!existsSync(memoryFilePath)) {
 		writeFileSync(memoryFilePath, DEFAULT_MEMORY_FILE_CONTENT, "utf-8");
 	}
@@ -105,6 +116,7 @@ export function ensureChatWorkspaceLayout(
 		inboxDir,
 		cronDir,
 		cronJobsDir,
+		cronConfigFilePath,
 		memoryFilePath,
 	};
 }

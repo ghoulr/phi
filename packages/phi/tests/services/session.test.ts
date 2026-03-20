@@ -280,8 +280,8 @@ describe("PiSessionRuntime", () => {
 		const routes = new ServiceRoutes();
 		const delivered: string[] = [];
 		routes.registerInteractiveRoute("cron:test", "default", "alice-cron");
-		routes.registerOutboundRoute("cron:test", "alice-cron", {
-			async deliver(_routeId, message): Promise<void> {
+		routes.registerOutboundRoute("alice-cron", "default", {
+			async deliver(message): Promise<void> {
 				delivered.push(message.text ?? "");
 			},
 		});
@@ -377,7 +377,10 @@ describe("PiSessionRuntime", () => {
 		});
 
 		await expect(
-			session.submitCron({ text: "Summarize status." })
+			session.submitCron({
+				text: "Summarize status.",
+				endpointChatId: "default",
+			})
 		).resolves.toEqual([]);
 		expect(delivered).toEqual(["progress"]);
 	});

@@ -12,6 +12,8 @@ function createCronJob(overrides: Partial<LoadedCronJob> = {}): LoadedCronJob {
 	return {
 		id: "daily",
 		enabled: true,
+		sessionId: "alice-main",
+		endpointChatId: "42",
 		prompt: "jobs/daily.md",
 		promptFilePath: "/tmp/daily.md",
 		promptText: "Do work",
@@ -47,7 +49,7 @@ describe("cron schedule", () => {
 		).toBe(Date.UTC(2026, 2, 8, 1, 0, 0));
 	});
 
-	it("skips nonexistent DST local times instead of throwing", () => {
+	it("computes DST-aware recurring runs", () => {
 		expect(
 			computeCronJobNextRunAtMs(
 				createCronJob({ cron: "30 2 * * *" }),
@@ -57,16 +59,15 @@ describe("cron schedule", () => {
 		).toBe(Date.UTC(2026, 2, 9, 6, 30, 0));
 	});
 
-	it("returns undefined for past one-shot jobs", () => {
+	it("returns undefined when one-shot job is already in the past", () => {
 		expect(
 			computeCronJobNextRunAtMs(
 				createCronJob({
-					id: "once",
 					cron: undefined,
-					at: "2026-03-08 09:00",
+					at: "2026-03-07 08:00",
 				}),
 				TIMEZONE,
-				Date.UTC(2026, 2, 9, 0, 0, 0)
+				Date.UTC(2026, 2, 7, 1, 0, 1)
 			)
 		).toBeUndefined();
 	});

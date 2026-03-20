@@ -207,15 +207,9 @@ function buildWorkspaceSection(params: {
 		"Phi config file is `.phi/config.yaml`, read `.phi/config.template.yaml` to learn config details about:",
 		"",
 		"- timezone",
-		"- cron",
 		"- skills env",
 		"",
-		"For cron prompt files under `<workspace>/.phi/cron/jobs/`, write what should happen when the job fires instead of user direct instructions.",
-		"Cron jobs live in workspace config. The target session is configured in `~/.phi/phi.yaml`.",
-		"",
-		"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends.",
-		"",
-		"See `docs/concepts/workspace-config.md`."
+		"After workspace config changes, call `reload` to validate them and schedule apply after your current reply ends."
 	);
 	return lines.join("\n");
 }

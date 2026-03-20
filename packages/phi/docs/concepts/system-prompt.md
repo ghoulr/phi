@@ -48,8 +48,6 @@ Service chat appends extra guidance:
 - Template: `<workspace>/.phi/config.template.yaml`
 - Call `reload` after workspace config changes to validate them and schedule apply after the current reply ends
 
-See `docs/concepts/workspace-config.md`.
-
 ## Skills in the prompt
 
 Phi uses the skills already loaded into the session resource loader.

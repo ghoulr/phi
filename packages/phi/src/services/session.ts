@@ -429,6 +429,7 @@ function createInteractiveMessagingExtensionFactories(
 
 function createCronMessagingExtensionFactories(params: {
 	sessionId: string;
+	endpointChatId: string;
 	routes: ServiceRoutes;
 	outboundMessages: PhiMessage[];
 }): ExtensionFactory[] {
@@ -436,8 +437,9 @@ function createCronMessagingExtensionFactories(params: {
 		createPhiMessagingExtension({
 			deliverMessage: async (message, phase) => {
 				if (phase === "instant") {
-					await params.routes.deliverOutbound(
+					await params.routes.deliverOutboundToEndpointChat(
 						params.sessionId,
+						params.endpointChatId,
 						message
 					);
 					return;
@@ -521,6 +523,7 @@ export class PiSessionRuntime implements Session {
 					this.params.configSessionId ?? this.params.sessionId,
 				extensionFactories: createCronMessagingExtensionFactories({
 					sessionId: this.params.sessionId,
+					endpointChatId: input.endpointChatId,
 					routes: this.params.routes,
 					outboundMessages,
 				}),
@@ -529,11 +532,16 @@ export class PiSessionRuntime implements Session {
 
 		try {
 			await session.sendUserMessage(buildCronAgentContent(input));
-			await this.publishCronResult(session, outboundMessages);
+			await this.publishCronResult(
+				session,
+				outboundMessages,
+				input.endpointChatId
+			);
 			return outboundMessages;
 		} catch (error: unknown) {
 			await this.publishCronError(
-				error instanceof Error ? error.message : String(error)
+				error instanceof Error ? error.message : String(error),
+				input.endpointChatId
 			);
 			throw error;
 		} finally {
@@ -568,7 +576,8 @@ export class PiSessionRuntime implements Session {
 
 	private async publishCronResult(
 		session: AgentSession,
-		outboundMessages: PhiMessage[]
+		outboundMessages: PhiMessage[],
+		endpointChatId: string
 	): Promise<void> {
 		const assistantMessage = createPublishedAssistantMessage(
 			getLastAssistantMessage(session),
@@ -591,8 +600,9 @@ export class PiSessionRuntime implements Session {
 					);
 				}
 				for (const message of outboundMessages) {
-					await this.params.routes.deliverOutbound(
+					await this.params.routes.deliverOutboundToEndpointChat(
 						this.params.sessionId,
+						endpointChatId,
 						message
 					);
 				}
@@ -600,7 +610,10 @@ export class PiSessionRuntime implements Session {
 		);
 	}
 
-	private async publishCronError(message: string): Promise<void> {
+	private async publishCronError(
+		message: string,
+		endpointChatId: string
+	): Promise<void> {
 		const errorText = `Cron job failed: ${message}`;
 		await this.params.sessionExecutor.run(
 			this.params.sessionId,
@@ -616,8 +629,9 @@ export class PiSessionRuntime implements Session {
 				session.agent.replaceMessages(
 					session.sessionManager.buildSessionContext().messages
 				);
-				await this.params.routes.deliverOutbound(
+				await this.params.routes.deliverOutboundToEndpointChat(
 					this.params.sessionId,
+					endpointChatId,
 					{
 						text: errorText,
 						attachments: [],

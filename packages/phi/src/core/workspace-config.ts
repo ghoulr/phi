@@ -5,16 +5,10 @@ import { parse } from "yaml";
 import workspaceConfigTemplateText from "@phi/templates/workspace-config.template.yaml" with {
 	type: "text",
 };
-import type { CronJobDefinition } from "@phi/cron/types";
 import { isRecord } from "@phi/core/type-guards";
 
 export interface PhiWorkspaceChatConfig {
 	timezone?: string;
-}
-
-export interface PhiWorkspaceCronConfig {
-	enabled?: boolean;
-	jobs?: CronJobDefinition[];
 }
 
 export interface PhiWorkspaceSkillEntryConfig {
@@ -28,7 +22,6 @@ export interface PhiWorkspaceSkillsConfig {
 export interface PhiWorkspaceConfig {
 	version?: number;
 	chat?: PhiWorkspaceChatConfig;
-	cron?: PhiWorkspaceCronConfig;
 	skills?: PhiWorkspaceSkillsConfig;
 }
 
@@ -98,7 +91,6 @@ export function loadPhiWorkspaceConfig(
 	}
 
 	requireOptionalRecord(rawConfig.chat, "chat", configFilePath);
-	requireOptionalRecord(rawConfig.cron, "cron", configFilePath);
 	requireOptionalRecord(rawConfig.skills, "skills", configFilePath);
 	return rawConfig as PhiWorkspaceConfig;
 }
@@ -112,27 +104,6 @@ export function resolveWorkspaceTimezone(
 		"chat.timezone",
 		configFilePath
 	);
-}
-
-export function resolveWorkspaceCronJobDefinitions(
-	workspaceConfig: PhiWorkspaceConfig,
-	configFilePath: string
-): CronJobDefinition[] {
-	const cronConfig = workspaceConfig.cron;
-	if (!cronConfig || cronConfig.enabled === false) {
-		return [];
-	}
-
-	const jobs = cronConfig.jobs;
-	if (jobs === undefined) {
-		return [];
-	}
-	if (!Array.isArray(jobs)) {
-		throw new Error(
-			`Invalid workspace config: cron.jobs must be a list (${configFilePath})`
-		);
-	}
-	return jobs as CronJobDefinition[];
 }
 
 export function resolveWorkspaceSkillEnvOverrides(

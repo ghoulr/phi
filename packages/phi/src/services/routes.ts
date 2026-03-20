@@ -16,36 +16,33 @@ export interface InteractiveInput {
 
 export interface CronInput {
 	text: string;
+	endpointChatId: string;
 }
 
 export interface SessionDelivery {
-	deliver(routeId: string, message: PhiMessage): Promise<void>;
+	deliver(message: PhiMessage): Promise<void>;
 }
 
 function createInteractiveRouteKey(
 	endpointId: string,
-	routeId: string
+	endpointChatId: string
 ): string {
-	return `${endpointId}\u0000${routeId}`;
+	return `${endpointId}\u0000${endpointChatId}`;
 }
 
-function createOutboundRouteKey(sessionId: string, endpointId: string): string {
-	return `${sessionId}\u0000${endpointId}`;
+function createOutboundRouteKey(
+	sessionId: string,
+	endpointChatId: string
+): string {
+	return `${sessionId}\u0000${endpointChatId}`;
 }
 
 export class ServiceRoutes {
 	private readonly sessions = new Map<string, Session>();
 	private readonly interactiveRoutes = new Map<string, string>();
-	private readonly cronRoutes = new Map<string, string>();
 	private readonly outboundRoutes = new Map<string, SessionDelivery>();
-	private readonly sessionRouteIds = new Map<
-		string,
-		Map<string, Set<string>>
-	>();
-	private readonly activeInteractiveContexts = new Map<
-		string,
-		{ endpointId: string; routeId: string }
-	>();
+	private readonly sessionEndpointChatIds = new Map<string, Set<string>>();
+	private readonly activeInteractiveContexts = new Map<string, string>();
 
 	public registerSession(sessionId: string, session: Session): () => void {
 		const existingSession = this.sessions.get(sessionId);
@@ -64,93 +61,71 @@ export class ServiceRoutes {
 
 	public registerInteractiveRoute(
 		endpointId: string,
-		routeId: string,
+		endpointChatId: string,
 		sessionId: string
 	): () => void {
-		const routeKey = createInteractiveRouteKey(endpointId, routeId);
+		const routeKey = createInteractiveRouteKey(endpointId, endpointChatId);
 		const existingSessionId = this.interactiveRoutes.get(routeKey);
 		if (existingSessionId && existingSessionId !== sessionId) {
 			throw new Error(
-				`Duplicate interactive route for endpoint ${endpointId} and route ${routeId}`
+				`Duplicate interactive route for endpoint ${endpointId} and chat ${endpointChatId}`
 			);
 		}
 		this.interactiveRoutes.set(routeKey, sessionId);
-		let endpointRouteIds = this.sessionRouteIds.get(sessionId);
-		if (!endpointRouteIds) {
-			endpointRouteIds = new Map<string, Set<string>>();
-			this.sessionRouteIds.set(sessionId, endpointRouteIds);
-		}
-		let routeIds = endpointRouteIds.get(endpointId);
-		if (!routeIds) {
-			routeIds = new Set<string>();
-			endpointRouteIds.set(endpointId, routeIds);
-		}
-		routeIds.add(routeId);
 		return () => {
 			if (this.interactiveRoutes.get(routeKey) === sessionId) {
 				this.interactiveRoutes.delete(routeKey);
-			}
-			const sessionEndpointRouteIds = this.sessionRouteIds.get(sessionId);
-			const sessionRouteIdsForEndpoint =
-				sessionEndpointRouteIds?.get(endpointId);
-			sessionRouteIdsForEndpoint?.delete(routeId);
-			if (sessionRouteIdsForEndpoint?.size === 0) {
-				sessionEndpointRouteIds?.delete(endpointId);
-			}
-			if (sessionEndpointRouteIds?.size === 0) {
-				this.sessionRouteIds.delete(sessionId);
-			}
-		};
-	}
-
-	public registerCronRoute(chatId: string, sessionId: string): () => void {
-		const existingSessionId = this.cronRoutes.get(chatId);
-		if (existingSessionId && existingSessionId !== sessionId) {
-			throw new Error(`Duplicate cron route for chat ${chatId}`);
-		}
-		this.cronRoutes.set(chatId, sessionId);
-		return () => {
-			if (this.cronRoutes.get(chatId) === sessionId) {
-				this.cronRoutes.delete(chatId);
 			}
 		};
 	}
 
 	public registerOutboundRoute(
-		endpointId: string,
 		sessionId: string,
+		endpointChatId: string,
 		delivery: SessionDelivery
 	): () => void {
-		const routeKey = createOutboundRouteKey(sessionId, endpointId);
+		const routeKey = createOutboundRouteKey(sessionId, endpointChatId);
 		const existingDelivery = this.outboundRoutes.get(routeKey);
 		if (existingDelivery) {
 			throw new Error(
-				`Duplicate outbound route for session ${sessionId} on endpoint ${endpointId}`
+				`Duplicate outbound route for session ${sessionId} and chat ${endpointChatId}`
 			);
 		}
 		this.outboundRoutes.set(routeKey, delivery);
+		let endpointChatIds = this.sessionEndpointChatIds.get(sessionId);
+		if (!endpointChatIds) {
+			endpointChatIds = new Set<string>();
+			this.sessionEndpointChatIds.set(sessionId, endpointChatIds);
+		}
+		endpointChatIds.add(endpointChatId);
 		return () => {
 			if (this.outboundRoutes.get(routeKey) === delivery) {
 				this.outboundRoutes.delete(routeKey);
+			}
+			const currentEndpointChatIds =
+				this.sessionEndpointChatIds.get(sessionId);
+			currentEndpointChatIds?.delete(endpointChatId);
+			if (currentEndpointChatIds?.size === 0) {
+				this.sessionEndpointChatIds.delete(sessionId);
 			}
 		};
 	}
 
 	public async dispatchInteractive(
 		endpointId: string,
-		routeId: string,
+		endpointChatId: string,
 		input: InteractiveInput
 	): Promise<void> {
 		const sessionId = this.interactiveRoutes.get(
-			createInteractiveRouteKey(endpointId, routeId)
+			createInteractiveRouteKey(endpointId, endpointChatId)
 		);
 		if (!sessionId) {
 			throw new Error(
-				`No session configured for route ${routeId} on endpoint ${endpointId}`
+				`No session configured for chat ${endpointChatId} on endpoint ${endpointId}`
 			);
 		}
 		const previousContext = this.activeInteractiveContexts.get(sessionId);
-		this.activeInteractiveContexts.set(sessionId, { endpointId, routeId });
+		this.activeInteractiveContexts.set(sessionId, endpointChatId);
 		try {
 			await this.requireSession(sessionId).submitInteractive(input);
 		} finally {
@@ -163,69 +138,65 @@ export class ServiceRoutes {
 	}
 
 	public async dispatchCron(
-		chatId: string,
+		sessionId: string,
 		input: CronInput
 	): Promise<PhiMessage[]> {
-		const sessionId = this.cronRoutes.get(chatId);
-		if (!sessionId) {
-			throw new Error(`No cron session configured for chat ${chatId}`);
-		}
 		return await this.requireSession(sessionId).submitCron(input);
+	}
+
+	public resolveEndpointChatId(sessionId: string): string {
+		return (
+			this.activeInteractiveContexts.get(sessionId) ??
+			this.resolveDefaultEndpointChatId(sessionId)
+		);
+	}
+
+	public async deliverOutboundToEndpointChat(
+		sessionId: string,
+		endpointChatId: string,
+		message: PhiMessage
+	): Promise<void> {
+		const delivery = this.outboundRoutes.get(
+			createOutboundRouteKey(sessionId, endpointChatId)
+		);
+		if (!delivery) {
+			throw new Error(
+				`No outbound route configured for session ${sessionId} and chat ${endpointChatId}`
+			);
+		}
+		await delivery.deliver(message);
 	}
 
 	public async deliverOutbound(
 		sessionId: string,
 		message: PhiMessage
 	): Promise<void> {
-		const context =
-			this.activeInteractiveContexts.get(sessionId) ??
-			this.resolveDefaultOutboundContext(sessionId);
-		const delivery = this.outboundRoutes.get(
-			createOutboundRouteKey(sessionId, context.endpointId)
+		await this.deliverOutboundToEndpointChat(
+			sessionId,
+			this.resolveEndpointChatId(sessionId),
+			message
 		);
-		if (!delivery) {
-			throw new Error(
-				`No outbound route configured for session ${sessionId}`
-			);
-		}
-		await delivery.deliver(context.routeId, message);
 	}
 
-	private resolveDefaultOutboundContext(sessionId: string): {
-		endpointId: string;
-		routeId: string;
-	} {
-		const endpointRouteIds = this.sessionRouteIds.get(sessionId);
-		if (!endpointRouteIds || endpointRouteIds.size === 0) {
+	private resolveDefaultEndpointChatId(sessionId: string): string {
+		const endpointChatIds = this.sessionEndpointChatIds.get(sessionId);
+		if (!endpointChatIds || endpointChatIds.size === 0) {
 			throw new Error(
 				`No outbound route configured for session ${sessionId}`
 			);
 		}
-		if (endpointRouteIds.size !== 1) {
+		if (endpointChatIds.size !== 1) {
 			throw new Error(
 				`No active outbound route for session ${sessionId}`
 			);
 		}
-		const firstEntry = endpointRouteIds.entries().next().value;
-		if (!firstEntry) {
+		const endpointChatId = endpointChatIds.values().next().value;
+		if (!endpointChatId) {
 			throw new Error(
 				`No active outbound route for session ${sessionId}`
 			);
 		}
-		const endpointId = firstEntry[0];
-		const routeIds = firstEntry[1];
-		if (routeIds.size !== 1) {
-			throw new Error(
-				`No active outbound route for session ${sessionId}`
-			);
-		}
-		const routeId = routeIds.values().next().value;
-		if (!routeId) {
-			throw new Error(
-				`No active outbound route for session ${sessionId}`
-			);
-		}
-		return { endpointId, routeId };
+		return endpointChatId;
 	}
 
 	private requireSession(sessionId: string): Session {

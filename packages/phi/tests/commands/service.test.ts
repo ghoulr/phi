@@ -8,7 +8,7 @@ import {
 } from "@phi/commands/service";
 import type {
 	PhiConfig,
-	ResolvedCronSessionServiceConfig,
+	ResolvedCronChatServiceConfig,
 	ResolvedFeishuSessionServiceConfig,
 	ResolvedTelegramSessionServiceConfig,
 } from "@phi/core/config";
@@ -40,11 +40,10 @@ function createTelegramSessionConfig(
 	};
 }
 
-function createCronSessionConfig(
-	overrides?: Partial<ResolvedCronSessionServiceConfig>
-): ResolvedCronSessionServiceConfig {
+function createCronChatConfig(
+	overrides?: Partial<ResolvedCronChatServiceConfig>
+): ResolvedCronChatServiceConfig {
 	return {
-		sessionId: "alice-cron",
 		chatId: "user-alice",
 		workspace: "~/phi/workspaces/alice",
 		...overrides,
@@ -123,8 +122,8 @@ describe("service command", () => {
 			resolveTelegramWildcardRoutes() {
 				return [];
 			},
-			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
-				return [createCronSessionConfig()];
+			resolveCronSessions(): ResolvedCronChatServiceConfig[] {
+				return [createCronChatConfig()];
 			},
 			createRoutes(): ServiceRoutes {
 				return new ServiceRoutes();
@@ -161,7 +160,6 @@ describe("service command", () => {
 		process.emit("SIGTERM");
 		await service;
 		expect(createdSessions).toEqual([
-			"alice-cron",
 			"alice-telegram",
 			"bob-telegram",
 			"carol-telegram",
@@ -218,7 +216,7 @@ describe("service command", () => {
 			resolveTelegramWildcardRoutes() {
 				return [];
 			},
-			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
+			resolveCronSessions(): ResolvedCronChatServiceConfig[] {
 				return [];
 			},
 			createRoutes(): ServiceRoutes {
@@ -297,7 +295,7 @@ describe("service command", () => {
 			resolveTelegramWildcardRoutes() {
 				return [];
 			},
-			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
+			resolveCronSessions(): ResolvedCronChatServiceConfig[] {
 				return [];
 			},
 			createRoutes(): ServiceRoutes {
@@ -389,7 +387,7 @@ describe("service command", () => {
 			resolveTelegramWildcardRoutes() {
 				return [];
 			},
-			resolveCronSessions(): ResolvedCronSessionServiceConfig[] {
+			resolveCronSessions(): ResolvedCronChatServiceConfig[] {
 				return [];
 			},
 			createRoutes(): ServiceRoutes {

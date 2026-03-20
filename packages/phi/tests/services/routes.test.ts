@@ -62,11 +62,11 @@ describe("service routes", () => {
 				},
 			})
 		);
-		routes.registerCronRoute("alice", "alice-cron");
 
 		expect(
-			await routes.dispatchCron("alice", {
+			await routes.dispatchCron("alice-cron", {
 				text: "cron prompt",
+				endpointChatId: "42",
 			})
 		).toEqual([{ text: "cron prompt", attachments: [] }]);
 	});
@@ -79,9 +79,9 @@ describe("service routes", () => {
 			"42",
 			"alice-telegram"
 		);
-		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
-			async deliver(routeId, message): Promise<void> {
-				delivered.push(`${routeId}:${message.text}`);
+		routes.registerOutboundRoute("alice-telegram", "42", {
+			async deliver(message): Promise<void> {
+				delivered.push(`42:${message.text}`);
 			},
 		});
 
@@ -91,6 +91,23 @@ describe("service routes", () => {
 		});
 
 		expect(delivered).toEqual(["42:done"]);
+	});
+
+	it("delivers outbound messages through an explicit endpoint chat id", async () => {
+		const routes = new ServiceRoutes();
+		const delivered: string[] = [];
+		routes.registerOutboundRoute("alice-telegram", "43", {
+			async deliver(message): Promise<void> {
+				delivered.push(`43:${message.text}`);
+			},
+		});
+
+		await routes.deliverOutboundToEndpointChat("alice-telegram", "43", {
+			text: "done",
+			attachments: [],
+		});
+
+		expect(delivered).toEqual(["43:done"]);
 	});
 
 	it("uses the active route context when one session has multiple routes", async () => {
@@ -117,9 +134,14 @@ describe("service routes", () => {
 			"43",
 			"alice-telegram"
 		);
-		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
-			async deliver(routeId, message): Promise<void> {
-				delivered.push(`${routeId}:${message.text}`);
+		routes.registerOutboundRoute("alice-telegram", "42", {
+			async deliver(message): Promise<void> {
+				delivered.push(`42:${message.text}`);
+			},
+		});
+		routes.registerOutboundRoute("alice-telegram", "43", {
+			async deliver(message): Promise<void> {
+				delivered.push(`43:${message.text}`);
 			},
 		});
 
@@ -157,7 +179,10 @@ describe("service routes", () => {
 			"43",
 			"alice-telegram"
 		);
-		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+		routes.registerOutboundRoute("alice-telegram", "42", {
+			async deliver(): Promise<void> {},
+		});
+		routes.registerOutboundRoute("alice-telegram", "43", {
 			async deliver(): Promise<void> {},
 		});
 
@@ -173,16 +198,16 @@ describe("service routes", () => {
 
 	it("fails fast when duplicate outbound route is registered", () => {
 		const routes = new ServiceRoutes();
-		routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+		routes.registerOutboundRoute("alice-telegram", "42", {
 			async deliver(): Promise<void> {},
 		});
 
 		expect(() =>
-			routes.registerOutboundRoute("telegram:bot-1", "alice-telegram", {
+			routes.registerOutboundRoute("alice-telegram", "42", {
 				async deliver(): Promise<void> {},
 			})
 		).toThrow(
-			"Duplicate outbound route for session alice-telegram on endpoint telegram:bot-1"
+			"Duplicate outbound route for session alice-telegram and chat 42"
 		);
 	});
 });
